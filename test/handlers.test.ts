@@ -128,6 +128,7 @@ describe("handleMessages", () => {
   });
 
   test("secret 未配置 → 500 config_error", async () => {
+    holder.v = null;
     // 构造一个不含 CCC_GLM_AUTH_TOKEN 的 config
     const noGlmConfig: AppConfig = {
       ...config,
@@ -207,6 +208,7 @@ describe("handleMessages", () => {
     });
     await handleMessages(req, config, mockFetchOk());
     expect(holder.v!.anthropicBeta).toBe("x-test-1");
+    expect(holder.v!.anthropicVersion).toBe("2023-06-01");
   });
 
   test("fetch 抛错 → 502 upstream_error", async () => {
