@@ -20,18 +20,27 @@ const config: AppConfig = {
   host: "127.0.0.1",
 };
 
-// 捕获 fetchImpl 收到的参数
-type Captured = { url: string; apiKey: string; body: string };
+// 捕获 fetchImpl 收到的参数（含上游 header）
+type Captured = {
+  url: string;
+  apiKey: string;
+  body: string;
+  anthropicVersion: string | null;
+  anthropicBeta: string | null;
+};
 
-function mockFetchOk(captured: Captured | null) {
+// 无参：原 captured 参数是 brief 残留脚手架，从未被读取（finding 3 清理）。
+// 真正生效的是对外层 holder.v 的赋值。
+function mockFetchOk() {
   return (async (url: string, init: RequestInit) => {
-    captured = {
+    const headers = new Headers(init.headers as HeadersInit);
+    holder.v = {
       url,
-      apiKey: new Headers(init.headers as HeadersInit).get("x-api-key")!,
+      apiKey: headers.get("x-api-key")!,
       body: init.body as string,
+      anthropicVersion: headers.get("anthropic-version"),
+      anthropicBeta: headers.get("anthropic-beta"),
     };
-    // 写到外层 captured：通过返回闭包外赋值——改用对象容器
-    holder.v = captured;
     return new Response("data: ok\n\n", {
       status: 200,
       headers: { "content-type": "text/event-stream", "request-id": "req-1" },
@@ -118,13 +127,31 @@ describe("handleMessages", () => {
     expect(res.status).toBe(400);
   });
 
+  test("secret 未配置 → 500 config_error", async () => {
+    // 构造一个不含 CCC_GLM_AUTH_TOKEN 的 config
+    const noGlmConfig: AppConfig = {
+      ...config,
+      secrets: { CCC_MINIMAX_AUTH_TOKEN: "mm-token" },
+    };
+    const req = new Request("https://x/v1/messages", {
+      method: "POST",
+      body: JSON.stringify({ model: "GLM-5.2", messages: [] }),
+    });
+    const res = await handleMessages(req, noGlmConfig, mockFetchOk());
+    expect(res.status).toBe(500);
+    const json = (await res.json()) as { error: { type: string } };
+    expect(json.error.type).toBe("config_error");
+    // 未触达 fetch
+    expect(holder.v).toBeNull();
+  });
+
   test("GLM-5.2[1m] 重写为 GLM-5.2 + 注入 glm secret", async () => {
     holder.v = null;
     const req = new Request("https://x/v1/messages", {
       method: "POST",
       body: JSON.stringify({ model: "GLM-5.2[1m]", messages: [] }),
     });
-    const res = await handleMessages(req, config, mockFetchOk(null));
+    const res = await handleMessages(req, config, mockFetchOk());
     expect(res.status).toBe(200);
     expect(holder.v!.url).toBe(
       "https://open.bigmodel.cn/api/anthropic/v1/messages"
@@ -139,7 +166,7 @@ describe("handleMessages", () => {
       method: "POST",
       body: JSON.stringify({ model: "MiniMax-M3[1m]", messages: [] }),
     });
-    await handleMessages(req, config, mockFetchOk(null));
+    await handleMessages(req, config, mockFetchOk());
     expect(JSON.parse(holder.v!.body).model).toBe("MiniMax-M3[1m]");
     expect(holder.v!.apiKey).toBe("mm-token");
   });
@@ -150,13 +177,36 @@ describe("handleMessages", () => {
       method: "POST",
       body: JSON.stringify({ model: "GLM-5.2", messages: [] }),
     });
-    const res = await handleMessages(req, config, mockFetchOk(null));
+    const res = await handleMessages(req, config, mockFetchOk());
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("text/event-stream");
     expect(res.headers.get("request-id")).toBe("req-1");
     expect(res.headers.get("cache-control")).toBe("no-cache");
     const text = await res.text();
     expect(text).toBe("data: ok\n\n");
+  });
+
+  test("缺 anthropic-version → 上游默认 2023-06-01", async () => {
+    holder.v = null;
+    const req = new Request("https://x/v1/messages", {
+      method: "POST",
+      body: JSON.stringify({ model: "GLM-5.2", messages: [] }),
+      // 故意不设 anthropic-version
+    });
+    await handleMessages(req, config, mockFetchOk());
+    expect(holder.v!.anthropicVersion).toBe("2023-06-01");
+    expect(holder.v!.anthropicBeta).toBeNull();
+  });
+
+  test("client 传 anthropic-beta → 透传上游", async () => {
+    holder.v = null;
+    const req = new Request("https://x/v1/messages", {
+      method: "POST",
+      headers: { "anthropic-beta": "x-test-1" },
+      body: JSON.stringify({ model: "GLM-5.2", messages: [] }),
+    });
+    await handleMessages(req, config, mockFetchOk());
+    expect(holder.v!.anthropicBeta).toBe("x-test-1");
   });
 
   test("fetch 抛错 → 502 upstream_error", async () => {
