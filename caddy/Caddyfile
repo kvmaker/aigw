@@ -1,8 +1,8 @@
 # aigw.kvmaker.cn — Caddy 反代到本地 bun，自动签发/续期 Let's Encrypt 证书
 # 前提：DNS aigw.kvmaker.cn → 1.12.240.16 灰云直连（DNS only），否则 HTTP-01 签证书失败
 aigw.kvmaker.cn {
-	reverse_proxy 127.0.0.1:8787
-
-	# SSE 友好：禁缓冲，长连接透传
-	flush_interval -1
+	reverse_proxy 127.0.0.1:8787 {
+		# SSE 友好：禁缓冲，长连接透传
+		flush_interval -1
+	}
 }
