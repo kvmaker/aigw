@@ -1,0 +1,15 @@
+[Unit]
+Description=ai-gw (Anthropic protocol router on Bun)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/ai-gw
+EnvironmentFile=/home/ubuntu/ai-gw/.env
+ExecStart=/home/ubuntu/.bun/bin/bun run src/index.ts
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
