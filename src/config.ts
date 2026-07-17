@@ -52,6 +52,19 @@ export const DEFAULT_ROUTES: Record<string, Upstream> = {
     secretKey: "CCC_GLM_AUTH_TOKEN",
     upstreamId: "GLM-5.2",
   },
+  // 火山方舟「Agent Plan」套餐专属 Anthropic 兼容端点（/api/plan）。
+  // 该 key 为 plan 专属，在标准端点 /api/v3/anthropic 上反而不被接受（401）。
+  // handlers 会拼 /v1/messages → https://ark.cn-beijing.volces.com/api/plan/v1/messages
+  "kimi-k3[1m]": {
+    baseUrl: "https://ark.cn-beijing.volces.com/api/plan",
+    secretKey: "CCC_ARK_AUTH_TOKEN",
+    upstreamId: "kimi-k3",
+  },
+  "kimi-k3": {
+    baseUrl: "https://ark.cn-beijing.volces.com/api/plan",
+    secretKey: "CCC_ARK_AUTH_TOKEN",
+    upstreamId: "kimi-k3",
+  },
 };
 
 // CCC_ROUTES env 条目结构
@@ -92,6 +105,7 @@ export function loadConfig(
     secrets: {
       CCC_MINIMAX_AUTH_TOKEN: env.CCC_MINIMAX_AUTH_TOKEN,
       CCC_GLM_AUTH_TOKEN: env.CCC_GLM_AUTH_TOKEN,
+      CCC_ARK_AUTH_TOKEN: env.CCC_ARK_AUTH_TOKEN,
     },
     port: Number(env.PORT ?? 8787),
     host: env.HOST ?? "127.0.0.1",

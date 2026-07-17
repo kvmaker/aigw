@@ -38,6 +38,16 @@ describe("DEFAULT_ROUTES", () => {
     expect(up).toBeDefined();
     expect(up.upstreamId).toBe("MiniMax-M2.7-highspeed");
   });
+  test("kimi-k3[1m] 与 kimi-k3 都命中同一上游（/api/plan 端点）", () => {
+    const up1 = DEFAULT_ROUTES[normalizeModel("kimi-k3[1m]")];
+    const up2 = DEFAULT_ROUTES[normalizeModel("kimi-k3")];
+    expect(up1).toBeDefined();
+    expect(up2).toBeDefined();
+    expect(up1).toBe(up2);
+    expect(up1.upstreamId).toBe("kimi-k3");
+    expect(up1.baseUrl).toBe("https://ark.cn-beijing.volces.com/api/plan");
+    expect(up1.secretKey).toBe("CCC_ARK_AUTH_TOKEN");
+  });
 });
 
 describe("loadRoutesFromEnv", () => {
@@ -66,12 +76,14 @@ describe("loadConfig", () => {
       CCC_ROUTER_TOKEN: "tok",
       CCC_MINIMAX_AUTH_TOKEN: "mm",
       CCC_GLM_AUTH_TOKEN: "glm",
+      CCC_ARK_AUTH_TOKEN: "ark",
       PORT: "9000",
       HOST: "0.0.0.0",
     });
     expect(cfg.routerToken).toBe("tok");
     expect(cfg.secrets.CCC_MINIMAX_AUTH_TOKEN).toBe("mm");
     expect(cfg.secrets.CCC_GLM_AUTH_TOKEN).toBe("glm");
+    expect(cfg.secrets.CCC_ARK_AUTH_TOKEN).toBe("ark");
     expect(cfg.port).toBe(9000);
     expect(cfg.host).toBe("0.0.0.0");
   });

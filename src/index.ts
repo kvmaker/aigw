@@ -58,6 +58,10 @@ if (import.meta.main) {
   Bun.serve({
     port: config.port,
     hostname: config.host,
+    // SSE 长连接友好：Bun.serve 默认 idleTimeout=10s，推理模型（kimi-k3 等）
+    // thinking 阶段 / 长 max_tokens 输出跨度可达数十秒，会被默认 idleTimeout 切断。
+    // 设为 Bun 上限 255s 足以覆盖任何合理推理时长；不死连探测交给 TCP keepalive。
+    idleTimeout: 255,
     fetch: (req) => routeRequest(req, config),
   });
   console.log(
