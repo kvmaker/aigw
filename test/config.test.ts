@@ -409,6 +409,74 @@ routes:
 `)
     ).toThrow(/unique/i);
   });
+
+  test("混用：upstream 用引用，fallbacks 内联对象", () => {
+    const routes = loadRoutesFromYaml(`
+upstreams:
+  ark:
+    baseUrl: https://ark.example.com
+    secretKey: CCC_ARK
+    upstreamId: kimi-k3
+routes:
+  - aliases: ["kimi-k3"]
+    upstream: ark
+    fallbacks:
+      - baseUrl: https://glm.example.com
+        secretKey: CCC_GLM
+        upstreamId: GLM-5.2
+`);
+    expect(routes["kimi-k3"].baseUrl).toBe("https://ark.example.com");
+    expect(routes["kimi-k3"].fallbacks![0].baseUrl).toBe("https://glm.example.com");
+    expect(routes["kimi-k3"].fallbacks![0].upstreamId).toBe("GLM-5.2");
+  });
+
+  test("混用：upstream 内联对象，fallbacks 用引用", () => {
+    const routes = loadRoutesFromYaml(`
+upstreams:
+  glm:
+    baseUrl: https://glm.example.com
+    secretKey: CCC_GLM
+    upstreamId: GLM-5.2
+routes:
+  - aliases: ["kimi-k3"]
+    upstream:
+      baseUrl: https://ark.example.com
+      secretKey: CCC_ARK
+      upstreamId: kimi-k3
+    fallbacks: [glm]
+`);
+    expect(routes["kimi-k3"].baseUrl).toBe("https://ark.example.com");
+    expect(routes["kimi-k3"].fallbacks![0].upstreamId).toBe("GLM-5.2");
+  });
+
+  test("upstreams 块内三元组非法 → ConfigError（定位到 upstreams.<name>）", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+upstreams:
+  glm:
+    baseUrl: ftp://nope.example.com
+    secretKey: CCC_GLM
+    upstreamId: GLM-5.2
+routes:
+  - aliases: ["x"]
+    upstream: glm
+`)
+    ).toThrow(/upstreams\.glm.*http\/https|http\/https.*upstreams\.glm/s);
+  });
+
+  test("upstreams 非 mapping（数组）→ ConfigError", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+upstreams: [1, 2, 3]
+routes:
+  - aliases: ["x"]
+    upstream:
+      baseUrl: https://x.example.com
+      secretKey: CCC_X
+      upstreamId: x
+`)
+    ).toThrow(/upstreams: must be a mapping/);
+  });
 });
 
 describe("loadConfig YAML 集成（三层优先级）", () => {
