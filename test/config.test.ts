@@ -330,6 +330,85 @@ routes:
   test("顶层空数组（[]）抛 ConfigError", () => {
     expect(() => loadRoutesFromYaml("[]")).toThrow(/at least one entry/i);
   });
+
+  // ---- 命名上游 + 字符串引用 ----
+  test("upstreams 块 + route 用字符串引用（主 + fallback）", () => {
+    const routes = loadRoutesFromYaml(`
+upstreams:
+  glm:
+    baseUrl: https://glm.example.com
+    secretKey: CCC_GLM
+    upstreamId: GLM-5.2
+  ark:
+    baseUrl: https://ark.example.com
+    secretKey: CCC_ARK
+    upstreamId: kimi-k3
+routes:
+  - aliases: ["glm-5.2"]
+    upstream: glm
+  - aliases: ["kimi-k3"]
+    upstream: ark
+    fallbacks: [glm]
+`);
+    expect(routes["glm-5.2"]).toBeDefined();
+    expect(routes["glm-5.2"].baseUrl).toBe("https://glm.example.com");
+    expect(routes["glm-5.2"].secretKey).toBe("CCC_GLM");
+    expect(routes["glm-5.2"].upstreamId).toBe("GLM-5.2");
+    expect(routes["glm-5.2"].fallbacks).toBeUndefined();
+
+    const kimi = routes["kimi-k3"];
+    expect(kimi.baseUrl).toBe("https://ark.example.com");
+    expect(kimi.fallbacks).toHaveLength(1);
+    expect(kimi.fallbacks![0].baseUrl).toBe("https://glm.example.com");
+    expect(kimi.fallbacks![0].secretKey).toBe("CCC_GLM");
+    expect(kimi.fallbacks![0].upstreamId).toBe("GLM-5.2");
+    expect(kimi.fallbacks![0].fallbacks).toBeUndefined();
+  });
+
+  test("引用不存在的上游名 → ConfigError（upstream 位置）", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+routes:
+  - aliases: ["x"]
+    upstream: nope
+`)
+    ).toThrow(/unknown upstream reference "nope"/);
+  });
+
+  test("引用不存在的上游名 → ConfigError（fallbacks 位置）", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+upstreams:
+  glm:
+    baseUrl: https://glm.example.com
+    secretKey: CCC_GLM
+    upstreamId: GLM-5.2
+routes:
+  - aliases: ["x"]
+    upstream: glm
+    fallbacks: [missing]
+`)
+    ).toThrow(/unknown upstream reference "missing"/);
+  });
+
+  test("upstreams 同名 key → ConfigError（parser 兜底）", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+upstreams:
+  glm:
+    baseUrl: https://a.example.com
+    secretKey: CCC_A
+    upstreamId: A
+  glm:
+    baseUrl: https://b.example.com
+    secretKey: CCC_B
+    upstreamId: B
+routes:
+  - aliases: ["x"]
+    upstream: glm
+`)
+    ).toThrow(/unique/i);
+  });
 });
 
 describe("loadConfig YAML 集成（三层优先级）", () => {

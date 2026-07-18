@@ -179,8 +179,48 @@ function validateUpstream(u: unknown, ctx: string): YamlUpstreamRaw {
   return { baseUrl, secretKey, upstreamId };
 }
 
+// 命名上游表：顶层 upstreams: 块的解析产物，name → 三元组。
+// route 的 upstream / fallbacks 元素若用字符串引用，就到这里查。
+type NamedUpstreams = Map<string, YamlUpstreamRaw>;
+
+// 解析顶层 upstreams: map（可选）。每个值复用 validateUpstream 校验。
+// 重名由 yaml parser 在 parse 阶段抛 Map keys must be unique 兜底，无需在此检测。
+function parseNamedUpstreams(raw: unknown): NamedUpstreams {
+  const map: NamedUpstreams = new Map();
+  if (raw === undefined) return map;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new ConfigError("upstreams: must be a mapping");
+  }
+  for (const [name, val] of Object.entries(raw as Record<string, unknown>)) {
+    map.set(name, validateUpstream(val, `upstreams.${name}`));
+  }
+  return map;
+}
+
+// 把 upstream / fallback 元素解析为三元组。
+// string → 在 named map 里查，查不到 fail-fast；object → 复用 validateUpstream（内联，向后兼容）。
+function resolveUpstreamRef(
+  node: unknown,
+  ctx: string,
+  named: NamedUpstreams
+): YamlUpstreamRaw {
+  if (typeof node === "string") {
+    const found = named.get(node);
+    if (!found) {
+      throw new ConfigError(`${ctx}: unknown upstream reference "${node}"`);
+    }
+    return found;
+  }
+  return validateUpstream(node, ctx);
+}
+
 // 校验一条路由 entry。非法即抛 ConfigError。
-function validateRouteEntry(entry: unknown, index: number): YamlRouteEntryRaw {
+// upstream / fallbacks 元素支持字符串引用（查 named）或内联对象（向后兼容）。
+function validateRouteEntry(
+  entry: unknown,
+  index: number,
+  named: NamedUpstreams
+): YamlRouteEntryRaw {
   const ctx = `routes[${index}]`;
   if (typeof entry !== "object" || entry === null) {
     throw new ConfigError(`${ctx}: must be an object`);
@@ -195,21 +235,22 @@ function validateRouteEntry(entry: unknown, index: number): YamlRouteEntryRaw {
       throw new ConfigError(`${ctx}.aliases[${i}]: must be a non-empty string`);
     }
   }
-  const upstream = validateUpstream(obj.upstream, `${ctx}.upstream`);
+  const upstream = resolveUpstreamRef(obj.upstream, `${ctx}.upstream`, named);
   let fallbacks: YamlUpstreamRaw[] | undefined;
   if (obj.fallbacks !== undefined) {
     if (!Array.isArray(obj.fallbacks)) {
       throw new ConfigError(`${ctx}.fallbacks: must be an array`);
     }
     fallbacks = obj.fallbacks.map((f, fi) =>
-      validateUpstream(f, `${ctx}.fallbacks[${fi}]`)
+      resolveUpstreamRef(f, `${ctx}.fallbacks[${fi}]`, named)
     );
   }
   return { aliases, upstream, fallbacks };
 }
 
 // 解析 YAML 字符串为路由表。纯函数（无 fs），便于单测。
-// 顶层形态：直接数组 或 { routes: [...] }。
+// 顶层形态：直接数组、{ routes: [...] }、{ upstreams: {...}, routes: [...] } 均可。
+// route 的 upstream / fallbacks 元素支持字符串引用（命名上游）或内联对象（向后兼容）。
 export function loadRoutesFromYaml(content: string): Record<string, Upstream> {
   let doc: unknown;
   try {
@@ -220,15 +261,20 @@ export function loadRoutesFromYaml(content: string): Record<string, Upstream> {
   if (doc === null || doc === undefined) {
     throw new ConfigError("YAML is empty");
   }
+
+  let named: NamedUpstreams;
   let entries: unknown[];
   if (Array.isArray(doc)) {
+    // 顶层直接是数组：无 upstreams 块，route 必须用内联对象。
+    named = new Map();
     entries = doc;
-  } else if (
-    typeof doc === "object" &&
-    doc !== null &&
-    Array.isArray((doc as Record<string, unknown>).routes)
-  ) {
-    entries = (doc as { routes: unknown[] }).routes;
+  } else if (typeof doc === "object" && doc !== null) {
+    const obj = doc as Record<string, unknown>;
+    if (!Array.isArray(obj.routes)) {
+      throw new ConfigError("YAML root must be an array or { routes: [...] }");
+    }
+    named = parseNamedUpstreams(obj.upstreams);
+    entries = obj.routes;
   } else {
     throw new ConfigError("YAML root must be an array or { routes: [...] }");
   }
@@ -239,7 +285,7 @@ export function loadRoutesFromYaml(content: string): Record<string, Upstream> {
 
   const routes: Record<string, Upstream> = {};
   for (const [index, entry] of entries.entries()) {
-    const valid = validateRouteEntry(entry, index);
+    const valid = validateRouteEntry(entry, index, named);
     const fb = valid.fallbacks?.map((f) => ({
       baseUrl: f.baseUrl,
       secretKey: f.secretKey,
