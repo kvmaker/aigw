@@ -69,7 +69,7 @@ interface RouteEntry {
 
 ---
 
-## B01. 增加使用 yaml 进行配置的能力 `[~]` -- P2
+## B01. 增加使用 yaml 进行配置的能力 `[x]` -- P2
 
 **现状**：路由表目前有两处来源——`src/config.ts` 里硬编码的 `DEFAULT_ROUTES`（改路由要改代码、重新部署），以及 `CCC_ROUTES` 环境变量（JSON 数组字符串，塞在 `.env` 里，可读性差、无注释、无校验）。随着上游增多（GLM / minimax / ark）和 B00 fallback 引入「主 + 备」结构，JSON 字符串会越来越难维护。
 
@@ -129,6 +129,16 @@ routes:
 - **schema 演进**：B00 fallback 结构若调整，YAML schema 需同步演进，注意版本兼容
 
 **依赖**：无（但与 B00 的 fallback 数据结构强相关，建议 B00 先定稿数据结构，或两者一起设计）
+
+**实施记录**（2026-07-18，分支 `todo/b01-yaml-config`，commit `cd24874`）：
+- `src/config.ts`：新增 `ConfigError`、`validateUpstream`/`validateRouteEntry`（schema 校验）、`loadRoutesFromYaml`（纯函数，顶层支持 `{routes:[...]}` 或裸数组两种形态）、`loadRoutesFromYamlFile`（`readFileSync` 包装）；`loadConfig` 改三层合并
+- YAML 层用 `secretKey`（对齐内部 `Upstream`），env JSON 层仍用 `secret`——两层字段名不同，各自映射，互不干扰
+- schema 校验 fail-fast：`baseUrl` 必须合法 http(s) URL（拦 `ftp://`、裸字符串）、`aliases` 非空数组、`secretKey`/`upstreamId` 非空；空 `fallbacks` 数组归一化为 `undefined`（向后兼容）
+- 测试：60 → 81（`config.test.ts` +21：解析两种顶层形态 / 带 fallbacks / 8 类 schema 非法 / 三层优先级覆盖 / 缺省不启用兼容 / 文件不存在 & schema 非法抛 `ConfigError`）
+- 新增 `yaml@2.9.0` 依赖（`package.json` + `bun.lock`）
+- `ai-gw.example.yaml`：入库示例（GLM 无 fallback / kimi-k3 → GLM / minimax-m3 → GLM），端到端加载验证通过
+- 文档：README「配置来源（三种 + 优先级）」小节、`.env.example` 加 `CCC_CONFIG_FILE`、`CLAUDE.md` 环境变量 + Gotchas 第 7 条（`secretKey` vs `secret` 易错点）
+- 热加载（`SIGHUP` / watch）按 TODO 标记为 P3 后续增强，本版仅启动加载一次；deploy 未改动（`CCC_CONFIG_FILE` 经 env 注入，rsync 时 yaml 随代码同步即可，注意把生产用 `ai-gw.yaml` 加入 rsync 或单独同步，且不含真实 secret）
 
 ---
 
