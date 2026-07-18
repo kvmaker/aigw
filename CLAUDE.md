@@ -7,7 +7,7 @@ ai-gw — Anthropic 协议路由器（Bun 版）。接收 `/v1/messages`，按 `
 ```bash
 bun install          # 安装依赖
 bun run dev          # 启动，监听 127.0.0.1:8787（= bun run start）
-bun test             # 跑测试（92 个，test/ 下 4 个文件）
+bun test             # 跑测试（94 个，test/ 下 4 个文件）
 ```
 
 > `bun` 可能不在 PATH，用 `~/.bun/bin/bun`。

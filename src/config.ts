@@ -234,6 +234,14 @@ function validateRouteEntry(
     if (typeof a !== "string" || a.length === 0) {
       throw new ConfigError(`${ctx}.aliases[${i}]: must be a non-empty string`);
     }
+    // normalize 后为空的 alias（如单独的 "[1m]"）会落到 routes[""]，无意义 → fail-fast。
+    // 注意：normalize 后多个 alias 重复（如 ["glm-5.2","glm-5.2[1m]"] 都归一为 glm-5.2）
+    // 是 [1m] 后缀设计的预期用法，不视为错误。
+    if (normalizeModel(a).length === 0) {
+      throw new ConfigError(
+        `${ctx}.aliases[${i}]: "${a}" normalizes to empty model key`
+      );
+    }
   }
   const upstream = resolveUpstreamRef(obj.upstream, `${ctx}.upstream`, named);
   let fallbacks: YamlUpstreamRaw[] | undefined;

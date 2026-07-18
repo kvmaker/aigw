@@ -214,6 +214,34 @@ routes:
     expect(routes["GLM-5.2[1m]"]).toBeUndefined();
   });
 
+  test("alias normalize 后为空 key 抛 ConfigError（如单独的 [1m]）", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+routes:
+  - aliases: ["[1m]"]
+    upstream:
+      baseUrl: https://x.example.com
+      secretKey: CCC_X
+      upstreamId: GLM-5.2
+`)
+    ).toThrow(/normalizes to empty/i);
+  });
+
+  test("同一 entry 多个 alias normalize 到同一 key 仍合法（[1m] alias 对设计）", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+upstreams:
+  glm:
+    baseUrl: https://x.example.com
+    secretKey: CCC_X
+    upstreamId: GLM-5.2
+routes:
+  - aliases: ["glm-5.2", "glm-5.2[1m]"]
+    upstream: glm
+`)
+    ).not.toThrow();
+  });
+
   // ---- schema 校验 fail-fast ----
   test("缺 aliases 抛 ConfigError", () => {
     expect(() =>
