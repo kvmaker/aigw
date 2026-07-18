@@ -48,6 +48,11 @@ describe("DEFAULT_ROUTES", () => {
     expect(up1.baseUrl).toBe("https://ark.cn-beijing.volces.com/api/plan");
     expect(up1.secretKey).toBe("CCC_ARK_AUTH_TOKEN");
   });
+  test("所有默认上游均无 fallbacks（向后兼容）", () => {
+    for (const up of Object.values(DEFAULT_ROUTES)) {
+      expect(up.fallbacks).toBeUndefined();
+    }
+  });
 });
 
 describe("loadRoutesFromEnv", () => {
@@ -61,6 +66,26 @@ describe("loadRoutesFromEnv", () => {
   });
   test("undefined 返回空对象", () => {
     expect(loadRoutesFromEnv(undefined)).toEqual({});
+  });
+  test("解析带 fallbacks 的 entry（顺序保留 + secret→secretKey 映射）", () => {
+    const routes = loadRoutesFromEnv(
+      '[{"aliases":["kimi-k3"],"baseUrl":"https://ark.example.com","secret":"CCC_ARK","upstreamId":"kimi-k3","fallbacks":[{"baseUrl":"https://glm.example.com","secret":"CCC_GLM","upstreamId":"GLM-5.2"},{"baseUrl":"https://mm.example.com","secret":"CCC_MM","upstreamId":"MiniMax-M3"}]}]'
+    );
+    const up = routes["kimi-k3"];
+    expect(up).toBeDefined();
+    expect(up.fallbacks).toHaveLength(2);
+    expect(up.fallbacks![0].baseUrl).toBe("https://glm.example.com");
+    expect(up.fallbacks![0].secretKey).toBe("CCC_GLM");
+    expect(up.fallbacks![0].upstreamId).toBe("GLM-5.2");
+    expect(up.fallbacks![0].fallbacks).toBeUndefined();
+    expect(up.fallbacks![1].upstreamId).toBe("MiniMax-M3");
+    expect(up.fallbacks![1].secretKey).toBe("CCC_MM");
+  });
+  test("无 fallbacks 字段时 up.fallbacks === undefined（向后兼容）", () => {
+    const routes = loadRoutesFromEnv(
+      '[{"aliases":["x"],"baseUrl":"https://x.example.com","secret":"CCC_X","upstreamId":"x"}]'
+    );
+    expect(routes["x"].fallbacks).toBeUndefined();
   });
 });
 

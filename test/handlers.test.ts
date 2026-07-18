@@ -222,3 +222,209 @@ describe("handleMessages", () => {
     expect(res.status).toBe(502);
   });
 });
+
+// === fallback（多候选）测试 ===
+
+// 主 kimi-k3 带 2 条 fallback：glm、minimax
+const fbConfig: AppConfig = {
+  routerToken: "secret",
+  routes: {
+    "kimi-k3": {
+      baseUrl: "https://ark.example.com/api/plan",
+      secretKey: "CCC_ARK_AUTH_TOKEN",
+      upstreamId: "kimi-k3",
+      fallbacks: [
+        {
+          baseUrl: "https://glm.example.com/api/anthropic",
+          secretKey: "CCC_GLM_AUTH_TOKEN",
+          upstreamId: "GLM-5.2",
+        },
+        {
+          baseUrl: "https://mm.example.com/anthropic",
+          secretKey: "CCC_MINIMAX_AUTH_TOKEN",
+          upstreamId: "MiniMax-M3[1m]",
+        },
+      ],
+    },
+  },
+  secrets: {
+    CCC_ARK_AUTH_TOKEN: "ark-token",
+    CCC_GLM_AUTH_TOKEN: "glm-token",
+    CCC_MINIMAX_AUTH_TOKEN: "mm-token",
+  },
+  port: 8787,
+  host: "127.0.0.1",
+};
+
+const sseResp = () =>
+  new Response("data: ok\n\n", {
+    status: 200,
+    headers: { "content-type": "text/event-stream", "request-id": "req-1" },
+  });
+const errResp = (status: number, body = "error") =>
+  new Response(body, {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+
+// 按序返回预设响应；responders 里的 Error 实例会被 throw（模拟网络错）。
+function mockFetchSeq(responders: (Response | Error)[]) {
+  const calls: Captured[] = [];
+  let i = 0;
+  const fn = (async (url: string, init: RequestInit) => {
+    const headers = new Headers(init.headers as HeadersInit);
+    calls.push({
+      url,
+      apiKey: headers.get("x-api-key")!,
+      body: init.body as string,
+      anthropicVersion: headers.get("anthropic-version"),
+      anthropicBeta: headers.get("anthropic-beta"),
+    });
+    if (i >= responders.length) {
+      throw new Error(`mockFetchSeq: no responder for call #${i} (${url})`);
+    }
+    const r = responders[i++];
+    if (r instanceof Error) throw r;
+    return r;
+  }) as typeof fetch;
+  return { fn, calls };
+}
+
+const fbReq = () =>
+  new Request("https://x/v1/messages", {
+    method: "POST",
+    body: JSON.stringify({ model: "kimi-k3", messages: [] }),
+  });
+
+describe("handleMessages · fallback", () => {
+  test("主 5xx → 备 200 → 透传 200，命中备 baseUrl", async () => {
+    const { fn, calls } = mockFetchSeq([errResp(503), sseResp()]);
+    const res = await handleMessages(fbReq(), fbConfig, fn);
+    expect(res.status).toBe(200);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].url).toBe("https://ark.example.com/api/plan/v1/messages");
+    expect(calls[1].url).toBe("https://glm.example.com/api/anthropic/v1/messages");
+  });
+
+  test("主 429 → 备 200 → 透传 200", async () => {
+    const { fn, calls } = mockFetchSeq([errResp(429), sseResp()]);
+    const res = await handleMessages(fbReq(), fbConfig, fn);
+    expect(res.status).toBe(200);
+    expect(calls).toHaveLength(2);
+  });
+
+  test("主 200 → 不调备", async () => {
+    const { fn, calls } = mockFetchSeq([sseResp()]);
+    const res = await handleMessages(fbReq(), fbConfig, fn);
+    expect(res.status).toBe(200);
+    expect(calls).toHaveLength(1);
+  });
+
+  test("主 4xx → 不调备，透传主 4xx", async () => {
+    const { fn, calls } = mockFetchSeq([errResp(400, "bad")]);
+    const res = await handleMessages(fbReq(), fbConfig, fn);
+    expect(res.status).toBe(400);
+    expect(calls).toHaveLength(1);
+    expect(await res.text()).toBe("bad");
+  });
+
+  test("主 5xx + 备 4xx → 透传备 4xx（停止 fallback）", async () => {
+    const { fn, calls } = mockFetchSeq([
+      errResp(503),
+      errResp(400, "client err"),
+    ]);
+    const res = await handleMessages(fbReq(), fbConfig, fn);
+    expect(res.status).toBe(400);
+    expect(calls).toHaveLength(2);
+    expect(await res.text()).toBe("client err");
+  });
+
+  test("候选链全部 5xx → 聚合 502，candidates 含每个 status", async () => {
+    const { fn, calls } = mockFetchSeq([
+      errResp(503),
+      errResp(500),
+      errResp(502),
+    ]);
+    const res = await handleMessages(fbReq(), fbConfig, fn);
+    expect(res.status).toBe(502);
+    expect(calls).toHaveLength(3);
+    const json = (await res.json()) as {
+      error: { type: string; candidates: { status?: number; reason: string }[] };
+    };
+    expect(json.error.type).toBe("all_upstreams_failed");
+    expect(json.error.candidates).toHaveLength(3);
+    expect(json.error.candidates.map((c) => c.status)).toEqual([503, 500, 502]);
+    expect(json.error.candidates.every((c) => c.reason === "http")).toBe(true);
+  });
+
+  test("主网络错 + 备 200 → 透传 200", async () => {
+    const { fn, calls } = mockFetchSeq([new Error("network down"), sseResp()]);
+    const res = await handleMessages(fbReq(), fbConfig, fn);
+    expect(res.status).toBe(200);
+    expect(calls).toHaveLength(2);
+  });
+
+  test("候选链全部网络错 → 聚合 502，candidates 全 network，不泄露异常文本", async () => {
+    const { fn, calls } = mockFetchSeq([
+      new Error("down1"),
+      new Error("down2"),
+      new Error("down3"),
+    ]);
+    const res = await handleMessages(fbReq(), fbConfig, fn);
+    expect(res.status).toBe(502);
+    expect(calls).toHaveLength(3);
+    const text = await res.text();
+    expect(text).not.toContain("down1"); // sanitized：不泄露原始网络异常文本
+    const json = JSON.parse(text) as {
+      error: { candidates: { reason: string }[] };
+    };
+    expect(json.error.candidates).toHaveLength(3);
+    expect(json.error.candidates.every((c) => c.reason === "network")).toBe(
+      true
+    );
+  });
+
+  test("主 secret 缺失 → 跳过主，调备 200", async () => {
+    const noArk: AppConfig = {
+      ...fbConfig,
+      secrets: {
+        CCC_GLM_AUTH_TOKEN: "glm-token",
+        CCC_MINIMAX_AUTH_TOKEN: "mm-token",
+      },
+    };
+    const { fn, calls } = mockFetchSeq([sseResp()]);
+    const res = await handleMessages(fbReq(), noArk, fn);
+    expect(res.status).toBe(200);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("https://glm.example.com/api/anthropic/v1/messages");
+  });
+
+  test("主备 secret 全缺 → 500 config_error，未触达 fetch", async () => {
+    const noSecrets: AppConfig = { ...fbConfig, secrets: {} };
+    const { fn, calls } = mockFetchSeq([sseResp()]);
+    const res = await handleMessages(fbReq(), noSecrets, fn);
+    expect(res.status).toBe(500);
+    expect(calls).toHaveLength(0);
+    const json = (await res.json()) as { error: { type: string } };
+    expect(json.error.type).toBe("config_error");
+  });
+
+  test("三候选：主 5xx → 备A 5xx → 备B 200 → 透传 B", async () => {
+    const { fn, calls } = mockFetchSeq([
+      errResp(503),
+      errResp(500),
+      sseResp(),
+    ]);
+    const res = await handleMessages(fbReq(), fbConfig, fn);
+    expect(res.status).toBe(200);
+    expect(calls).toHaveLength(3);
+    expect(calls[2].url).toBe("https://mm.example.com/anthropic/v1/messages");
+  });
+
+  test("per-candidate model 重写：主不重写，备按 upstreamId 重写", async () => {
+    const { fn, calls } = mockFetchSeq([errResp(503), sseResp()]);
+    await handleMessages(fbReq(), fbConfig, fn);
+    expect(JSON.parse(calls[0].body).model).toBe("kimi-k3");
+    expect(JSON.parse(calls[1].body).model).toBe("GLM-5.2");
+  });
+});

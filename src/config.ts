@@ -9,6 +9,10 @@ export interface Upstream {
    *  client 可能发别名（如 GLM-5.2[1m]），但 GLM 上游只认 GLM-5.2；
    *  minimax 上游认 MiniMax-M3[1m]。转发前会把 body.model 重写为这个值。 */
   upstreamId: string;
+  /** 备选上游链：主上游失败（网络错 / 5xx / 429 / 529）时按序尝试。
+   *  每个 candidate 独立重写 model、注入自己的 secret。缺省无 fallback。
+   *  仅挂在路由命中的主 Upstream 上；同一 Upstream 的多个 alias 共享同一条链。 */
+  fallbacks?: Upstream[];
 }
 
 export interface AppConfig {
@@ -67,12 +71,41 @@ export const DEFAULT_ROUTES: Record<string, Upstream> = {
   },
 };
 
-// CCC_ROUTES env 条目结构
+// CCC_ROUTES env 条目结构（env 层用 secret 字段名，与上游 JSON 兼容）
+interface FallbackEntry {
+  baseUrl: string;
+  secret: string;
+  upstreamId: string;
+}
+
 interface RouteEntry {
   aliases: string[];
   baseUrl: string;
   secret: string;
   upstreamId: string;
+  /** 备选上游链（env 层）；加载时递归映射为内部 Upstream.fallbacks */
+  fallbacks?: FallbackEntry[];
+}
+
+// 把 env 层条目映射为内部 Upstream：secret → secretKey。
+// 单层 fallback：fallback 候选不再支持嵌套 fallbacks（避免循环引用 / 过度工程），
+// 即便 JSON 里写了也会被忽略——handlers 只展平一层候选链。
+function toUpstream(e: {
+  baseUrl: string;
+  secret: string;
+  upstreamId: string;
+  fallbacks?: FallbackEntry[];
+}): Upstream {
+  return {
+    baseUrl: e.baseUrl,
+    secretKey: e.secret,
+    upstreamId: e.upstreamId,
+    fallbacks: e.fallbacks?.map((f) => ({
+      baseUrl: f.baseUrl,
+      secretKey: f.secret,
+      upstreamId: f.upstreamId,
+    })),
+  };
 }
 
 // 解析 CCC_ROUTES（JSON 数组）为路由表；undefined 返回空对象。
@@ -83,11 +116,7 @@ export function loadRoutesFromEnv(
   const entries: RouteEntry[] = JSON.parse(envValue);
   const routes: Record<string, Upstream> = {};
   for (const e of entries) {
-    const up: Upstream = {
-      baseUrl: e.baseUrl,
-      secretKey: e.secret,
-      upstreamId: e.upstreamId,
-    };
+    const up = toUpstream(e);
     for (const alias of e.aliases) {
       routes[normalizeModel(alias)] = up;
     }
