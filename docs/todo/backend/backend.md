@@ -139,6 +139,7 @@ routes:
 - `ai-gw.example.yaml`：入库示例（GLM 无 fallback / kimi-k3 → GLM / minimax-m3 → GLM），端到端加载验证通过
 - 文档：README「配置来源（三种 + 优先级）」小节、`.env.example` 加 `CCC_CONFIG_FILE`、`CLAUDE.md` 环境变量 + Gotchas 第 7 条（`secretKey` vs `secret` 易错点）
 - 热加载（`SIGHUP` / watch）按 TODO 标记为 P3 后续增强，本版仅启动加载一次；deploy 未改动（`CCC_CONFIG_FILE` 经 env 注入，rsync 时 yaml 随代码同步即可，注意把生产用 `ai-gw.yaml` 加入 rsync 或单独同步，且不含真实 secret）
+- **CodeRabbit review fix**（同分支 follow-up commit，7 findings 取 3）：①`loadConfig` 改动态收集 `secrets`（扫合并后路由表所有 `secretKey` 含 fallback 候选，从 env 解析），修复「YAML 声明自定义 `secretKey` 查不到 → handlers `secret_missing` → 500」的真 bug——原实现硬编码三个内置 key，使 B01「YAML 灵活配新上游」的核心价值失效；②`loadRoutesFromYaml` 对空 routes 数组（`{routes:[]}` / 裸 `[]`）fail-fast；③README `aggregate502` 终态描述改脱敏版（只 `index/reason/status`，与 `handlers.ts` 代码对齐）。测试 81 → 84。skip 4 个：`handlers.ts` / `handlers.test.ts` 不在 B01 diff（ark 拼 `/api/plan/v1/messages` 为 CLAUDE.md Gotcha#3 有意设计；`[1m]` 是 minimax 真实 model ID，`config.test.ts` 已断言 `MiniMax-M3[1m]`）
 
 ---
 

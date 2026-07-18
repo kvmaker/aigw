@@ -322,6 +322,14 @@ routes:
   test("顶层既非数组也非 {routes:[]} 抛 ConfigError", () => {
     expect(() => loadRoutesFromYaml("foo: bar\n")).toThrow(/root/i);
   });
+
+  test("空 routes 数组（{routes:[]}）抛 ConfigError", () => {
+    expect(() => loadRoutesFromYaml("routes: []")).toThrow(/at least one entry/i);
+  });
+
+  test("顶层空数组（[]）抛 ConfigError", () => {
+    expect(() => loadRoutesFromYaml("[]")).toThrow(/at least one entry/i);
+  });
 });
 
 describe("loadConfig YAML 集成（三层优先级）", () => {
@@ -384,5 +392,34 @@ describe("loadConfig YAML 集成（三层优先级）", () => {
     const badPath = join(tmp, "bad.yaml");
     writeFileSync(badPath, "routes:\n  - aliases: []\n", "utf8");
     expect(() => loadConfig({ CCC_CONFIG_FILE: badPath })).toThrow(ConfigError);
+  });
+
+  test("YAML 声明的自定义 secretKey（主 + fallback）被收集进 secrets", () => {
+    const customPath = join(tmp, "custom.yaml");
+    writeFileSync(
+      customPath,
+      `routes:
+  - aliases: ["new-model"]
+    upstream:
+      baseUrl: https://new.example.com
+      secretKey: CCC_NEW_TOKEN
+      upstreamId: new-real
+    fallbacks:
+      - baseUrl: https://fb.example.com
+        secretKey: CCC_FB_TOKEN
+        upstreamId: fb-real
+`,
+      "utf8"
+    );
+    const cfg = loadConfig({
+      CCC_CONFIG_FILE: customPath,
+      CCC_NEW_TOKEN: "tok-new",
+      CCC_FB_TOKEN: "tok-fb",
+    });
+    // 主 + fallback 的自定义 secretKey 都能从 env 解析（F3 修复核心断言）
+    expect(cfg.secrets["CCC_NEW_TOKEN"]).toBe("tok-new");
+    expect(cfg.secrets["CCC_FB_TOKEN"]).toBe("tok-fb");
+    expect(cfg.routes["new-model"].secretKey).toBe("CCC_NEW_TOKEN");
+    expect(cfg.routes["new-model"].fallbacks![0].secretKey).toBe("CCC_FB_TOKEN");
   });
 });

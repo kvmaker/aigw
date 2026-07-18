@@ -233,6 +233,10 @@ export function loadRoutesFromYaml(content: string): Record<string, Upstream> {
     throw new ConfigError("YAML root must be an array or { routes: [...] }");
   }
 
+  if (entries.length === 0) {
+    throw new ConfigError("YAML routes must contain at least one entry");
+  }
+
   const routes: Record<string, Upstream> = {};
   for (const [index, entry] of entries.entries()) {
     const valid = validateRouteEntry(entry, index);
@@ -281,14 +285,25 @@ export function loadConfig(
   }
   routes = { ...routes, ...loadRoutesFromEnv(env.CCC_ROUTES) };
 
+  // secrets 动态收集：扫描合并后路由表里所有 secretKey（含 fallback 候选），
+  // 从 env 解析对应 token。这样 YAML/env 声明任意 secretKey 都能被 handlers 命中，
+  // 而非只能用内置三个硬编码 key。
+  const secretKeys = new Set<string>();
+  for (const upstream of Object.values(routes)) {
+    secretKeys.add(upstream.secretKey);
+    for (const fb of upstream.fallbacks ?? []) {
+      secretKeys.add(fb.secretKey);
+    }
+  }
+  const secrets: Record<string, string | undefined> = {};
+  for (const key of secretKeys) {
+    secrets[key] = env[key];
+  }
+
   return {
     routerToken: env.CCC_ROUTER_TOKEN ?? "",
     routes,
-    secrets: {
-      CCC_MINIMAX_AUTH_TOKEN: env.CCC_MINIMAX_AUTH_TOKEN,
-      CCC_GLM_AUTH_TOKEN: env.CCC_GLM_AUTH_TOKEN,
-      CCC_ARK_AUTH_TOKEN: env.CCC_ARK_AUTH_TOKEN,
-    },
+    secrets,
     port: Number(env.PORT ?? 8787),
     host: env.HOST ?? "127.0.0.1",
   };

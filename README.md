@@ -95,7 +95,7 @@ routes:
 
 **终态**：
 - 单上游（未配 fallback）：行为不变——5xx/429 原样透传，网络错返回 502，secret 缺失返回 500。
-- 多候选：首个 2xx 或 4xx 透传并停止；所有候选都失败时返回**聚合 502**，body 含每个候选的 `baseUrl / status / message`，便于排查。
+- 多候选：首个 2xx 或 4xx 透传并停止；所有候选都失败时返回**聚合 502**（已脱敏），body 只含每个候选的 `index / reason / status`，**不泄露** `baseUrl`、异常文本或上游正文（完整错误仅供服务端日志）。
 
 **per-candidate model 重写**：每个候选按自己的 `upstreamId` 重写 `body.model`，支持跨 provider 链（如 kimi-k3 主 → GLM 备）。注意 fallback 到不同模型时，输出质量 / 能力可能存在差异。
 
