@@ -39,7 +39,7 @@ bun test             # 跑测试（81 个，test/ 下 4 个文件）
 4. **`normalizeModel` 剥 `[1m]` 后缀 + 小写**：路由匹配用 normalize 后的 key；`DEFAULT_ROUTES` 里带 `[1m]` 的 key 是死代码（normalize 后查不到），保留仅为表意。
 5. **model 重写**：client 发别名（`kimi-k3[1m]`），转发前重写为 `upstreamId`（`kimi-k3`）——上游不认 `[1m]`。
 6. **fallback 仅在开始透传响应 body 首字节前生效**：判定只看 HTTP status（5xx / 429 / 529 触发，4xx 不触发），不读 body——SSE 一旦开始流式透传就无法回退。聚合 502 / config_error 已 sanitized，不向客户端泄露 baseUrl / 异常文本 / upstream 正文。gw→upstream 的 `fetch` 暂无超时（待 B02 TODO），上游 hang 住不抛错时 fallback 不触发。单上游（无 `fallbacks`）行为等价于旧版。
-7. **YAML 配置层用 `secretKey`（不是 env JSON 的 `secret`）**：YAML（`ai-gw.example.yaml`）与内部 `Upstream` 对齐用 `secretKey` 字段，env JSON（`CCC_ROUTES`）用 `secret`——两者字段名不同，加载时各自映射。`secretKey` 的值是 env 变量名（如 `CCC_ARK_AUTH_TOKEN`），真实 token 仍只在 `.env`。优先级 `DEFAULT_ROUTES < CCC_CONFIG_FILE(YAML) < CCC_ROUTES`；YAML schema 非法（缺字段 / baseUrl 非 http(s) / 空数组）会 fail-fast 抛 `ConfigError` 拒绝启动。顶层支持 `{routes:[...]}` 或直接数组两种形态。
+7. **YAML 配置层用 `secretKey`（不是 env JSON 的 `secret`）**：YAML（`ai-gw.example.yaml`）与内部 `Upstream` 对齐用 `secretKey` 字段，env JSON（`CCC_ROUTES`）用 `secret`——两者字段名不同，加载时各自映射。`secretKey` 的值是 env 变量名（如 `CCC_ARK_AUTH_TOKEN`），真实 token 仍只在 `.env`。优先级 `DEFAULT_ROUTES < CCC_CONFIG_FILE(YAML) < CCC_ROUTES`；YAML schema 非法（缺字段 / baseUrl 非 http(s) / 空数组）会 fail-fast 抛 `ConfigError` 拒绝启动。顶层支持 `{routes:[...]}` 或直接数组两种形态。顶层可选 `upstreams:` 块给每个上游命名（三元组定义一次），route 的 `upstream` / `fallbacks` 支持字符串引用或内联对象（向后兼容）；引用未定义的名字 fail-fast。重名 key 由 yaml parser 直接报 `Map keys must be unique`。
 
 ## 部署（gz-a100，systemd + caddy）
 
