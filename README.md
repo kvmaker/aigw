@@ -63,7 +63,7 @@ bun test               # 跑测试
 **per-candidate model 重写**：每个候选按自己的 `upstreamId` 重写 `body.model`，支持跨 provider 链（如 kimi-k3 主 → GLM 备）。注意 fallback 到不同模型时，输出质量 / 能力可能存在差异。
 
 **已知限制**：
-- fallback 仅在「拿到上游 Response headers 之前」生效。一旦开始 SSE 流式透传（客户端已收到首字节），上游中断无法回退——这是 SSE 固有限制。
+- fallback 仅在「开始向客户端透传上游响应 body 的首字节之前」生效（判定靠 HTTP status）。一旦开始 SSE 流式透传（客户端已收到首字节），上游中断无法回退——这是 SSE 固有限制。
 - gw→upstream 的 `fetch` 暂无超时（待 B02）。上游建连成功但 hang 住不返首字节时 `fetch` 不会抛错，fallback 不会触发。
 
 ## 部署（gz-a100）

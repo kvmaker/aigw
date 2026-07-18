@@ -96,13 +96,19 @@ export function shouldFallback(status: number): boolean {
   return status >= 500 || status === 429 || status === 529;
 }
 
-// 所有候选都失败时的聚合 502：列出每个候选的失败原因，便于排查。
+// 所有候选都失败时的聚合 502。
+// 只向客户端暴露 sanitized 信息（index + reason + status），不泄露 baseUrl /
+// 网络异常文本 / upstream 响应正文——完整错误仅供服务端日志。
 export function aggregate502(errors: CandidateError[]): Response {
   return jsonResponse(502, {
     error: {
       type: "all_upstreams_failed",
       message: `all ${errors.length} upstream candidate(s) failed`,
-      candidates: errors,
+      candidates: errors.map((e, i) => ({
+        index: i,
+        reason: e.reason,
+        ...(e.status !== undefined ? { status: e.status } : {}),
+      })),
     },
   });
 }
@@ -204,12 +210,13 @@ export async function handleMessages(
       return passthroughResponse(upstreamResp);
     }
 
-    // 多候选：drain body 释放连接 + 记录失败，继续下一个候选
+    // 多候选：取消 body 流（不读可能很大的错误正文）+ 记录失败，继续下一个候选
+    await upstreamResp.body?.cancel().catch(() => undefined);
     errors.push({
       baseUrl: cand.baseUrl,
       reason: "http",
       status: upstreamResp.status,
-      message: await upstreamResp.text().catch(() => ""),
+      message: `upstream returned HTTP ${upstreamResp.status}`,
     });
   }
 
@@ -221,7 +228,6 @@ export async function handleMessages(
       error: {
         type: "config_error",
         message: "no token available for any upstream candidate",
-        candidates: errors,
       },
     });
   }

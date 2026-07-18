@@ -87,8 +87,9 @@ interface RouteEntry {
   fallbacks?: FallbackEntry[];
 }
 
-// 把 env 层条目（含 fallbacks）映射为内部 Upstream：secret → secretKey，fallbacks 递归。
-// 无 fallbacks 字段时返回 undefined（向后兼容）。
+// 把 env 层条目映射为内部 Upstream：secret → secretKey。
+// 单层 fallback：fallback 候选不再支持嵌套 fallbacks（避免循环引用 / 过度工程），
+// 即便 JSON 里写了也会被忽略——handlers 只展平一层候选链。
 function toUpstream(e: {
   baseUrl: string;
   secret: string;
@@ -99,7 +100,11 @@ function toUpstream(e: {
     baseUrl: e.baseUrl,
     secretKey: e.secret,
     upstreamId: e.upstreamId,
-    fallbacks: e.fallbacks?.map((f) => toUpstream(f)),
+    fallbacks: e.fallbacks?.map((f) => ({
+      baseUrl: f.baseUrl,
+      secretKey: f.secret,
+      upstreamId: f.upstreamId,
+    })),
   };
 }
 

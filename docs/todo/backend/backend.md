@@ -140,14 +140,16 @@ routes:
 
 **方案**
 
-新增 `fetchWithTimeout(url, init, timeoutMs, signal)`（`src/handlers.ts`）：
+新增 `fetchWithTimeout(url, init, timeoutMs, clientSignal)`（`src/handlers.ts`）：
 
 - 内部建 `AbortController`，`setTimeout(timeoutMs)` 后 `abort`
-- 超时抛出的 `AbortError` 在 `handleMessages` 候选链里当 network 错（已有 catch 分支），自然走 fallback
-- 透传客户端请求的 `signal`（客户端断连时级联 abort 上游，释放资源）
+- **区分两种 abort（关键）**：
+  - **本地超时**（`setTimeout` 触发）：当 network 错处理 → 进候选链 catch 分支，**继续下一个候选**
+  - **客户端主动取消**（`clientSignal` 触发，如 Claude Code 断连）：**立即终止候选链**并向上层传播取消，不再尝试后续上游（避免给已放弃的请求继续打上游、浪费配额）
+  - 实现需在 catch 里判别 `AbortError` 来源（比较 `clientSignal.aborted` 或 `err === clientSignal.reason`）
 - 默认 `timeoutMs`：30s（覆盖 Anthropic streaming 首字节延迟）；env `CCC_UPSTREAM_TIMEOUT_MS` 可调
 
-> 超时是「首字节 / 建连」超时，不是「总响应时长」——SSE 开始流式透传后就不管了（流式期间的长输出由 `idleTimeout: 255` 兜底）。
+**timeout 语义（明确）**：覆盖「建连 + 等待响应首字节」——即拿到 `Response`（含 status + headers）之前。一旦 headers 到达、开始透传 SSE body，超时不再适用（流式期间的长输出由 `idleTimeout: 255` 兜底）。若要覆盖「200 但 body 首字节迟迟不来」，需把 timeout 应用到首个 `body.getReader().read()`——但这会与 SSE 透传冲突，B02 暂不覆盖，仅做建连 / headers 超时。
 
 **改动点**
 

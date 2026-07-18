@@ -364,7 +364,7 @@ describe("handleMessages · fallback", () => {
     expect(calls).toHaveLength(2);
   });
 
-  test("候选链全部网络错 → 聚合 502，candidates 全 network", async () => {
+  test("候选链全部网络错 → 聚合 502，candidates 全 network，不泄露异常文本", async () => {
     const { fn, calls } = mockFetchSeq([
       new Error("down1"),
       new Error("down2"),
@@ -373,14 +373,15 @@ describe("handleMessages · fallback", () => {
     const res = await handleMessages(fbReq(), fbConfig, fn);
     expect(res.status).toBe(502);
     expect(calls).toHaveLength(3);
-    const json = (await res.json()) as {
-      error: { candidates: { reason: string; message: string }[] };
+    const text = await res.text();
+    expect(text).not.toContain("down1"); // sanitized：不泄露原始网络异常文本
+    const json = JSON.parse(text) as {
+      error: { candidates: { reason: string }[] };
     };
     expect(json.error.candidates).toHaveLength(3);
     expect(json.error.candidates.every((c) => c.reason === "network")).toBe(
       true
     );
-    expect(json.error.candidates[0].message).toContain("down1");
   });
 
   test("主 secret 缺失 → 跳过主，调备 200", async () => {
