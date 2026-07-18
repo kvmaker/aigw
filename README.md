@@ -68,7 +68,7 @@ routes:
 
 ## Fallback（上游容错）
 
-路由表支持「主 + 备」候选链：主上游失败时按序尝试 `fallbacks`，命中首个成功的响应即返回，对客户端透明。通过 `CCC_ROUTES` 配置（`DEFAULT_ROUTES` 不预置 fallback）：
+路由表支持「主 + 备」候选链：主上游失败时按序尝试 `fallbacks`，命中首个成功的响应即返回，对客户端透明。可通过 `CCC_CONFIG_FILE`（YAML，见上「YAML 配置」）或 `CCC_ROUTES`（env JSON）配置；`DEFAULT_ROUTES` 不预置 fallback。下面以 `CCC_ROUTES` 为例：
 
 ```json
 [

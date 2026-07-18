@@ -7,7 +7,9 @@
 #   内置 DEFAULT_ROUTES  <  本 YAML 文件  <  CCC_ROUTES（env JSON，最高，便于临时覆盖）
 #
 # secretKey 写的是 .env 里的环境变量名，真实 token 绝不入 YAML、不入库。
-# 顶层支持两种形态：本文件用的 { routes: [...] }，或直接写成数组。
+# 顶层支持三种形态：直接数组、{ routes: [...] }，
+# 或本文件使用的 { upstreams: {...}, routes: [...] }。
+# route 的 upstream / fallbacks 也支持内联对象（兼容旧格式）。
 
 # 命名上游：每个上游（baseUrl + secretKey + upstreamId）定义一次并命名，
 # route 的 upstream / fallbacks 只需写名字，避免 fallback 里三元组重复。
