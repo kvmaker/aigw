@@ -4,7 +4,7 @@ ai-gw 后端路由/转发核心逻辑：路由表、model 重写、BYOK secret �
 
 ---
 
-## B00. 添加模型 fallback 的能力 `[ ]` -- P1
+## B00. 添加模型 fallback 的能力 `[x]` -- P1
 
 **现状**：当前 `src/handlers.ts:handleMessages` 一次只命中一个上游，失败直接 502/504 给客户端（`src/handlers.ts:103-122`）。当某个 provider（GLM / minimax / ark）故障或限流时，客户端（包括 Claude Code）会收到硬错误，且无自动恢复路径。
 
@@ -58,6 +58,14 @@ interface RouteEntry {
 - **模型名假设**：fallback 候选必须支持相同 `upstreamId`（如 `kimi-k3` 主 → 备也用 `kimi-k3`），否则需 per-candidate `upstreamId` 重写
 
 **依赖**：无
+
+**实施记录**（2026-07-18，分支 `todo/b00-model-fallback`）：
+- `src/config.ts`：`Upstream` 加 `fallbacks?`、`RouteEntry` 加 `fallbacks?`、`loadRoutesFromEnv` 经 `toUpstream` 递归映射；`DEFAULT_ROUTES` 不变
+- `src/handlers.ts`：抽 `passthroughResponse` / `shouldFallback` / `aggregate502`；`handleMessages` 改候选链循环，用 `multi` 区分单/多候选（单候选完全向后兼容）；顺手修掉原 body 二次 parse
+- 终态（已确认）：多候选全失败 → 聚合 502（带 candidates）；单候选 5xx/429 透传、网络错 502、secret 缺 500，均向后兼容
+- 测试：45 → 60（config +3、handlers fallback +12），现有 11 个 handlers 用例作回归网未改
+- fetch 超时拆为 **B02**
+- 文档：README 新增「Fallback」小节、CLAUDE.md Gotchas 第 6 条
 
 ---
 
@@ -121,3 +129,35 @@ routes:
 - **schema 演进**：B00 fallback 结构若调整，YAML schema 需同步演进，注意版本兼容
 
 **依赖**：无（但与 B00 的 fallback 数据结构强相关，建议 B00 先定稿数据结构，或两者一起设计）
+
+---
+
+## B02. 给 gw→upstream fetch 加超时，让 fallback 覆盖上游 hang 场景 `[ ]` -- P1
+
+**现状**：B00 的 fallback 仅在 `fetch` 抛错或上游返回 5xx/429/529 时触发。但 gw→upstream 的 `fetch` 没有任何超时——`Bun.serve` 的 `idleTimeout: 255` 只管 client↔gw。生产中常见的「TCP 建连成功、上游 hang 住不返首字节」会让 `fetch` 永远 pending，既不抛错也不返回，fallback 永不触发，整个请求挂死到客户端超时。
+
+**目标**：给上游 `fetch` 加首字节超时（AbortController），超时按网络错处理 → 触发 fallback。让 B00 的容错覆盖上游 hang 这一最常见生产故障。
+
+**方案**
+
+新增 `fetchWithTimeout(url, init, timeoutMs, signal)`（`src/handlers.ts`）：
+
+- 内部建 `AbortController`，`setTimeout(timeoutMs)` 后 `abort`
+- 超时抛出的 `AbortError` 在 `handleMessages` 候选链里当 network 错（已有 catch 分支），自然走 fallback
+- 透传客户端请求的 `signal`（客户端断连时级联 abort 上游，释放资源）
+- 默认 `timeoutMs`：30s（覆盖 Anthropic streaming 首字节延迟）；env `CCC_UPSTREAM_TIMEOUT_MS` 可调
+
+> 超时是「首字节 / 建连」超时，不是「总响应时长」——SSE 开始流式透传后就不管了（流式期间的长输出由 `idleTimeout: 255` 兜底）。
+
+**改动点**
+
+- `src/handlers.ts`：新增 `fetchWithTimeout`；`handleMessages` 把 `fetchImpl(...)` 换成 `fetchWithTimeout(...)`；从 `config` 读 `upstreamTimeoutMs`
+- `src/config.ts`：`AppConfig` 加 `upstreamTimeoutMs: number`；`loadConfig` 读 `env.CCC_UPSTREAM_TIMEOUT_MS ?? 30000`
+- `test/handlers.test.ts`：timeout 触发 fallback 用例（mock 第一调用挂住，`fetchWithTimeout` 超时后第二候选 200）；注入短 timeoutMs 避免测试真等 30s
+- `README.md` / `CLAUDE.md`：移除「fetch 无超时」已知限制，改为超时行为说明
+
+**收益**：fallback 覆盖上游 hang；客户端断连级联释放上游连接。
+
+**风险**：timeoutMs 设太短会误杀正常推理（首字节前的 thinking）；设太长起不到保护作用。30s 是经验值，需按真实 provider 首字节延迟 P99 校准。
+
+**依赖**：B00（在其候选链 catch 分支基础上接超时）
