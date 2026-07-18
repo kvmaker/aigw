@@ -1,9 +1,14 @@
-import { test, expect, describe } from "bun:test";
+import { test, expect, describe, afterAll } from "bun:test";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   normalizeModel,
   DEFAULT_ROUTES,
   loadRoutesFromEnv,
+  loadRoutesFromYaml,
   loadConfig,
+  ConfigError,
 } from "../src/config";
 
 describe("normalizeModel", () => {
@@ -122,5 +127,299 @@ describe("loadConfig", () => {
         '[{"aliases":["glm-5.2"],"baseUrl":"https://override.example.com","secret":"CCC_GLM_AUTH_TOKEN","upstreamId":"GLM-5.2"}]',
     });
     expect(cfg.routes["glm-5.2"].baseUrl).toBe("https://override.example.com");
+  });
+});
+
+// ===== B01: YAML 配置 =====
+
+describe("loadRoutesFromYaml", () => {
+  test("解析 {routes:[...]} 形态，aliases 展开为 key，secretKey 保留", () => {
+    const routes = loadRoutesFromYaml(`
+routes:
+  - aliases: ["glm-5.2", "glm-5.2[1m]"]
+    upstream:
+      baseUrl: https://open.bigmodel.cn/api/anthropic
+      secretKey: CCC_GLM_AUTH_TOKEN
+      upstreamId: GLM-5.2
+`);
+    expect(routes["glm-5.2"]).toBeDefined();
+    expect(routes["glm-5.2"].upstreamId).toBe("GLM-5.2");
+    expect(routes["glm-5.2"].secretKey).toBe("CCC_GLM_AUTH_TOKEN");
+    expect(routes["glm-5.2"].baseUrl).toBe(
+      "https://open.bigmodel.cn/api/anthropic"
+    );
+    expect(routes["glm-5.2"].fallbacks).toBeUndefined();
+  });
+
+  test("顶层直接是数组也能解析", () => {
+    const routes = loadRoutesFromYaml(`
+- aliases: ["x"]
+  upstream:
+    baseUrl: https://x.example.com
+    secretKey: CCC_X
+    upstreamId: x
+`);
+    expect(routes["x"]).toBeDefined();
+    expect(routes["x"].upstreamId).toBe("x");
+  });
+
+  test("解析带 fallbacks 的 entry（顺序保留 + secretKey 映射）", () => {
+    const routes = loadRoutesFromYaml(`
+routes:
+  - aliases: ["kimi-k3"]
+    upstream:
+      baseUrl: https://ark.example.com
+      secretKey: CCC_ARK
+      upstreamId: kimi-k3
+    fallbacks:
+      - baseUrl: https://glm.example.com
+        secretKey: CCC_GLM
+        upstreamId: GLM-5.2
+      - baseUrl: https://mm.example.com
+        secretKey: CCC_MM
+        upstreamId: MiniMax-M3
+`);
+    const up = routes["kimi-k3"];
+    expect(up.fallbacks).toHaveLength(2);
+    expect(up.fallbacks![0].secretKey).toBe("CCC_GLM");
+    expect(up.fallbacks![0].upstreamId).toBe("GLM-5.2");
+    expect(up.fallbacks![1].upstreamId).toBe("MiniMax-M3");
+    // 单层 fallback：候选不再嵌套 fallbacks
+    expect(up.fallbacks![0].fallbacks).toBeUndefined();
+  });
+
+  test("空 fallbacks 数组视为 undefined（向后兼容）", () => {
+    const routes = loadRoutesFromYaml(`
+routes:
+  - aliases: ["x"]
+    upstream:
+      baseUrl: https://x.example.com
+      secretKey: CCC_X
+      upstreamId: x
+    fallbacks: []
+`);
+    expect(routes["x"].fallbacks).toBeUndefined();
+  });
+
+  test("aliases 展开时做 normalize（剥 [1m] + 小写）", () => {
+    const routes = loadRoutesFromYaml(`
+routes:
+  - aliases: ["GLM-5.2[1m]"]
+    upstream:
+      baseUrl: https://x.example.com
+      secretKey: CCC_X
+      upstreamId: GLM-5.2
+`);
+    expect(routes["glm-5.2"]).toBeDefined();
+    expect(routes["GLM-5.2[1m]"]).toBeUndefined();
+  });
+
+  // ---- schema 校验 fail-fast ----
+  test("缺 aliases 抛 ConfigError", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+routes:
+  - upstream:
+      baseUrl: https://x.example.com
+      secretKey: CCC_X
+      upstreamId: x
+`)
+    ).toThrow(/aliases/);
+  });
+
+  test("空 aliases 数组抛 ConfigError", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+routes:
+  - aliases: []
+    upstream:
+      baseUrl: https://x.example.com
+      secretKey: CCC_X
+      upstreamId: x
+`)
+    ).toThrow(/aliases/);
+  });
+
+  test("缺 upstream 抛 ConfigError", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+routes:
+  - aliases: ["x"]
+`)
+    ).toThrow(/upstream/);
+  });
+
+  test("baseUrl 非法 URL 抛 ConfigError", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+routes:
+  - aliases: ["x"]
+    upstream:
+      baseUrl: not-a-url
+      secretKey: CCC_X
+      upstreamId: x
+`)
+    ).toThrow(/baseUrl/);
+  });
+
+  test("baseUrl 非 http/https 抛 ConfigError", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+routes:
+  - aliases: ["x"]
+    upstream:
+      baseUrl: ftp://x.example.com
+      secretKey: CCC_X
+      upstreamId: x
+`)
+    ).toThrow(/http\/https/);
+  });
+
+  test("secretKey 空抛 ConfigError", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+routes:
+  - aliases: ["x"]
+    upstream:
+      baseUrl: https://x.example.com
+      secretKey: ""
+      upstreamId: x
+`)
+    ).toThrow(/secretKey/);
+  });
+
+  test("upstreamId 缺失抛 ConfigError", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+routes:
+  - aliases: ["x"]
+    upstream:
+      baseUrl: https://x.example.com
+      secretKey: CCC_X
+`)
+    ).toThrow(/upstreamId/);
+  });
+
+  test("fallbacks 非数组抛 ConfigError", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+routes:
+  - aliases: ["x"]
+    upstream:
+      baseUrl: https://x.example.com
+      secretKey: CCC_X
+      upstreamId: x
+    fallbacks: "oops"
+`)
+    ).toThrow(/fallbacks/);
+  });
+
+  test("空 YAML 抛 ConfigError", () => {
+    expect(() => loadRoutesFromYaml("")).toThrow(/empty/i);
+    expect(() => loadRoutesFromYaml("---")).toThrow();
+  });
+
+  test("顶层既非数组也非 {routes:[]} 抛 ConfigError", () => {
+    expect(() => loadRoutesFromYaml("foo: bar\n")).toThrow(/root/i);
+  });
+
+  test("空 routes 数组（{routes:[]}）抛 ConfigError", () => {
+    expect(() => loadRoutesFromYaml("routes: []")).toThrow(/at least one entry/i);
+  });
+
+  test("顶层空数组（[]）抛 ConfigError", () => {
+    expect(() => loadRoutesFromYaml("[]")).toThrow(/at least one entry/i);
+  });
+});
+
+describe("loadConfig YAML 集成（三层优先级）", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "aigw-yaml-"));
+  const yamlPath = join(tmp, "routes.yaml");
+  writeFileSync(
+    yamlPath,
+    `routes:
+  - aliases: ["glm-5.2"]
+    upstream:
+      baseUrl: https://yaml.example.com
+      secretKey: CCC_GLM_AUTH_TOKEN
+      upstreamId: GLM-5.2
+  - aliases: ["yaml-only"]
+    upstream:
+      baseUrl: https://only.example.com
+      secretKey: CCC_X
+      upstreamId: yo
+`,
+    "utf8"
+  );
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  test("CCC_CONFIG_FILE 加载 YAML 并覆盖 DEFAULT_ROUTES 同名 key", () => {
+    const cfg = loadConfig({ CCC_CONFIG_FILE: yamlPath });
+    expect(cfg.routes["glm-5.2"].baseUrl).toBe("https://yaml.example.com");
+  });
+
+  test("YAML 新增的 key 也可命中（默认表里没有）", () => {
+    const cfg = loadConfig({ CCC_CONFIG_FILE: yamlPath });
+    expect(cfg.routes["yaml-only"]).toBeDefined();
+    expect(cfg.routes["yaml-only"].upstreamId).toBe("yo");
+  });
+
+  test("三层优先级：CCC_ROUTES 覆盖 YAML，YAML 覆盖 DEFAULT_ROUTES", () => {
+    const cfg = loadConfig({
+      CCC_CONFIG_FILE: yamlPath,
+      CCC_ROUTES:
+        '[{"aliases":["glm-5.2"],"baseUrl":"https://env.example.com","secret":"CCC_GLM_AUTH_TOKEN","upstreamId":"GLM-5.2"}]',
+    });
+    // CCC_ROUTES（最高优先）胜出
+    expect(cfg.routes["glm-5.2"].baseUrl).toBe("https://env.example.com");
+  });
+
+  test("不设 CCC_CONFIG_FILE 时行为不变（仅默认表）", () => {
+    const cfg = loadConfig({});
+    expect(cfg.routes["glm-5.2"].baseUrl).toBe(
+      "https://open.bigmodel.cn/api/anthropic"
+    );
+    expect(cfg.routes["yaml-only"]).toBeUndefined();
+  });
+
+  test("CCC_CONFIG_FILE 指向不存在文件 → 抛 ConfigError", () => {
+    expect(() =>
+      loadConfig({ CCC_CONFIG_FILE: join(tmp, "nope.yaml") })
+    ).toThrow(ConfigError);
+  });
+
+  test("CCC_CONFIG_FILE 指向 schema 非法的 YAML → 抛 ConfigError", () => {
+    const badPath = join(tmp, "bad.yaml");
+    writeFileSync(badPath, "routes:\n  - aliases: []\n", "utf8");
+    expect(() => loadConfig({ CCC_CONFIG_FILE: badPath })).toThrow(ConfigError);
+  });
+
+  test("YAML 声明的自定义 secretKey（主 + fallback）被收集进 secrets", () => {
+    const customPath = join(tmp, "custom.yaml");
+    writeFileSync(
+      customPath,
+      `routes:
+  - aliases: ["new-model"]
+    upstream:
+      baseUrl: https://new.example.com
+      secretKey: CCC_NEW_TOKEN
+      upstreamId: new-real
+    fallbacks:
+      - baseUrl: https://fb.example.com
+        secretKey: CCC_FB_TOKEN
+        upstreamId: fb-real
+`,
+      "utf8"
+    );
+    const cfg = loadConfig({
+      CCC_CONFIG_FILE: customPath,
+      CCC_NEW_TOKEN: "tok-new",
+      CCC_FB_TOKEN: "tok-fb",
+    });
+    // 主 + fallback 的自定义 secretKey 都能从 env 解析（F3 修复核心断言）
+    expect(cfg.secrets["CCC_NEW_TOKEN"]).toBe("tok-new");
+    expect(cfg.secrets["CCC_FB_TOKEN"]).toBe("tok-fb");
+    expect(cfg.routes["new-model"].secretKey).toBe("CCC_NEW_TOKEN");
+    expect(cfg.routes["new-model"].fallbacks![0].secretKey).toBe("CCC_FB_TOKEN");
   });
 });

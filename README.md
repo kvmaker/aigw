@@ -25,6 +25,43 @@ bun test               # 跑测试
 > - GLM 上游不认 `[1m]` 后缀，转发前会把 `body.model` 重写为 `upstreamId`。
 > - ark（火山方舟）走「Agent Plan」套餐专属端点 `/api/plan`，该 key 在标准端点 `/api/v3/anthropic` 上不被接受。
 
+## 配置来源（路由表三种来源 + 优先级）
+
+路由表有三个来源，按优先级合并（后者覆盖前者同名 key）：
+
+| 优先级 | 来源 | 适用场景 |
+|---|---|---|
+| 低 | `DEFAULT_ROUTES`（`src/config.ts` 硬编码） | 内置兜底，改它需改代码 + 重新部署 |
+| 中 | YAML 文件（`CCC_CONFIG_FILE` 指向） | **推荐**：可读、可注释、适合 fallback 链等嵌套结构 |
+| 高 | `CCC_ROUTES`（env JSON 数组字符串） | 临时覆盖 / 快速 hotfix，可读性差 |
+
+### YAML 配置（推荐）
+
+复制示例文件并按需修改，再用 `CCC_CONFIG_FILE` 指向它：
+
+```bash
+cp ai-gw.example.yaml ai-gw.yaml
+# 编辑 ai-gw.yaml 后启动
+CCC_CONFIG_FILE=./ai-gw.yaml bun run dev
+```
+
+YAML schema（与 [Fallback](#fallback上游容错) 数据结构对齐）：
+
+```yaml
+routes:
+  - aliases: ["kimi-k3", "kimi-k3[1m]"]
+    upstream:
+      baseUrl: https://ark.cn-beijing.volces.com/api/plan
+      secretKey: CCC_ARK_AUTH_TOKEN     # .env 里的变量名，不是真实 token
+      upstreamId: kimi-k3
+    fallbacks:                           # 可选
+      - baseUrl: https://open.bigmodel.cn/api/anthropic
+        secretKey: CCC_GLM_AUTH_TOKEN
+        upstreamId: GLM-5.2
+```
+
+加载时做 schema 校验（`aliases` 非空、`baseUrl` 合法 http(s) URL、`secretKey`/`upstreamId` 非空），非法配置 fail-fast 拒绝启动。`secretKey` 写环境变量名，真实 token 依旧只在 `.env`。
+
 ## Fallback（上游容错）
 
 路由表支持「主 + 备」候选链：主上游失败时按序尝试 `fallbacks`，命中首个成功的响应即返回，对客户端透明。通过 `CCC_ROUTES` 配置（`DEFAULT_ROUTES` 不预置 fallback）：
@@ -58,7 +95,7 @@ bun test               # 跑测试
 
 **终态**：
 - 单上游（未配 fallback）：行为不变——5xx/429 原样透传，网络错返回 502，secret 缺失返回 500。
-- 多候选：首个 2xx 或 4xx 透传并停止；所有候选都失败时返回**聚合 502**，body 含每个候选的 `baseUrl / status / message`，便于排查。
+- 多候选：首个 2xx 或 4xx 透传并停止；所有候选都失败时返回**聚合 502**（已脱敏），body 只含每个候选的 `index / reason / status`，**不泄露** `baseUrl`、异常文本或上游正文（完整错误仅供服务端日志）。
 
 **per-candidate model 重写**：每个候选按自己的 `upstreamId` 重写 `body.model`，支持跨 provider 链（如 kimi-k3 主 → GLM 备）。注意 fallback 到不同模型时，输出质量 / 能力可能存在差异。
 
