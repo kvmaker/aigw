@@ -45,26 +45,30 @@ cp ai-gw.example.yaml ai-gw.yaml
 CCC_CONFIG_FILE=./ai-gw.yaml bun run dev
 ```
 
-YAML schema（与 [Fallback](#fallback上游容错) 数据结构对齐）：
+YAML schema（与 [Fallback](#fallback上游容错) 数据结构对齐）。顶层可选 `upstreams:` 块给每个上游命名（`baseUrl` + `secretKey` + `upstreamId` 三元组定义一次），`routes` 里的 `upstream` 与 `fallbacks` 既能写命名引用，也能内联对象（向后兼容）：
 
 ```yaml
+upstreams:
+  glm:
+    baseUrl: https://open.bigmodel.cn/api/anthropic
+    secretKey: CCC_GLM_AUTH_TOKEN     # .env 里的变量名，不是真实 token
+    upstreamId: GLM-5.2
+  ark:
+    baseUrl: https://ark.cn-beijing.volces.com/api/plan
+    secretKey: CCC_ARK_AUTH_TOKEN
+    upstreamId: kimi-k3
+
 routes:
   - aliases: ["kimi-k3", "kimi-k3[1m]"]
-    upstream:
-      baseUrl: https://ark.cn-beijing.volces.com/api/plan
-      secretKey: CCC_ARK_AUTH_TOKEN     # .env 里的变量名，不是真实 token
-      upstreamId: kimi-k3
-    fallbacks:                           # 可选
-      - baseUrl: https://open.bigmodel.cn/api/anthropic
-        secretKey: CCC_GLM_AUTH_TOKEN
-        upstreamId: GLM-5.2
+    upstream: ark                      # 引用 upstreams.ark
+    fallbacks: [glm]                   # 引用 upstreams.glm，三元组不再重复
 ```
 
-加载时做 schema 校验（`aliases` 非空、`baseUrl` 合法 http(s) URL、`secretKey`/`upstreamId` 非空），非法配置 fail-fast 拒绝启动。`secretKey` 写环境变量名，真实 token 依旧只在 `.env`。
+加载时做 schema 校验（`aliases` 非空、`baseUrl` 合法 http(s) URL、`secretKey`/`upstreamId` 非空、`upstreams` 为 mapping），非法配置 fail-fast 拒绝启动；引用未定义的上游名也会 fail-fast。`secretKey` 写环境变量名，真实 token 依旧只在 `.env`。
 
 ## Fallback（上游容错）
 
-路由表支持「主 + 备」候选链：主上游失败时按序尝试 `fallbacks`，命中首个成功的响应即返回，对客户端透明。通过 `CCC_ROUTES` 配置（`DEFAULT_ROUTES` 不预置 fallback）：
+路由表支持「主 + 备」候选链：主上游失败时按序尝试 `fallbacks`，命中首个成功的响应即返回，对客户端透明。可通过 `CCC_CONFIG_FILE`（YAML，见上「YAML 配置」）或 `CCC_ROUTES`（env JSON）配置；`DEFAULT_ROUTES` 不预置 fallback。下面以 `CCC_ROUTES` 为例：
 
 ```json
 [

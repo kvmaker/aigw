@@ -214,6 +214,34 @@ routes:
     expect(routes["GLM-5.2[1m]"]).toBeUndefined();
   });
 
+  test("alias normalize 后为空 key 抛 ConfigError（如单独的 [1m]）", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+routes:
+  - aliases: ["[1m]"]
+    upstream:
+      baseUrl: https://x.example.com
+      secretKey: CCC_X
+      upstreamId: GLM-5.2
+`)
+    ).toThrow(/normalizes to empty/i);
+  });
+
+  test("同一 entry 多个 alias normalize 到同一 key 仍合法（[1m] alias 对设计）", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+upstreams:
+  glm:
+    baseUrl: https://x.example.com
+    secretKey: CCC_X
+    upstreamId: GLM-5.2
+routes:
+  - aliases: ["glm-5.2", "glm-5.2[1m]"]
+    upstream: glm
+`)
+    ).not.toThrow();
+  });
+
   // ---- schema 校验 fail-fast ----
   test("缺 aliases 抛 ConfigError", () => {
     expect(() =>
@@ -329,6 +357,153 @@ routes:
 
   test("顶层空数组（[]）抛 ConfigError", () => {
     expect(() => loadRoutesFromYaml("[]")).toThrow(/at least one entry/i);
+  });
+
+  // ---- 命名上游 + 字符串引用 ----
+  test("upstreams 块 + route 用字符串引用（主 + fallback）", () => {
+    const routes = loadRoutesFromYaml(`
+upstreams:
+  glm:
+    baseUrl: https://glm.example.com
+    secretKey: CCC_GLM
+    upstreamId: GLM-5.2
+  ark:
+    baseUrl: https://ark.example.com
+    secretKey: CCC_ARK
+    upstreamId: kimi-k3
+routes:
+  - aliases: ["glm-5.2"]
+    upstream: glm
+  - aliases: ["kimi-k3"]
+    upstream: ark
+    fallbacks: [glm]
+`);
+    expect(routes["glm-5.2"]).toBeDefined();
+    expect(routes["glm-5.2"].baseUrl).toBe("https://glm.example.com");
+    expect(routes["glm-5.2"].secretKey).toBe("CCC_GLM");
+    expect(routes["glm-5.2"].upstreamId).toBe("GLM-5.2");
+    expect(routes["glm-5.2"].fallbacks).toBeUndefined();
+
+    const kimi = routes["kimi-k3"];
+    expect(kimi.baseUrl).toBe("https://ark.example.com");
+    expect(kimi.fallbacks).toHaveLength(1);
+    expect(kimi.fallbacks![0].baseUrl).toBe("https://glm.example.com");
+    expect(kimi.fallbacks![0].secretKey).toBe("CCC_GLM");
+    expect(kimi.fallbacks![0].upstreamId).toBe("GLM-5.2");
+    expect(kimi.fallbacks![0].fallbacks).toBeUndefined();
+  });
+
+  test("引用不存在的上游名 → ConfigError（upstream 位置）", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+routes:
+  - aliases: ["x"]
+    upstream: nope
+`)
+    ).toThrow(/unknown upstream reference "nope"/);
+  });
+
+  test("引用不存在的上游名 → ConfigError（fallbacks 位置）", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+upstreams:
+  glm:
+    baseUrl: https://glm.example.com
+    secretKey: CCC_GLM
+    upstreamId: GLM-5.2
+routes:
+  - aliases: ["x"]
+    upstream: glm
+    fallbacks: [missing]
+`)
+    ).toThrow(/unknown upstream reference "missing"/);
+  });
+
+  test("upstreams 同名 key → ConfigError（parser 兜底）", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+upstreams:
+  glm:
+    baseUrl: https://a.example.com
+    secretKey: CCC_A
+    upstreamId: A
+  glm:
+    baseUrl: https://b.example.com
+    secretKey: CCC_B
+    upstreamId: B
+routes:
+  - aliases: ["x"]
+    upstream: glm
+`)
+    ).toThrow(/unique/i);
+  });
+
+  test("混用：upstream 用引用，fallbacks 内联对象", () => {
+    const routes = loadRoutesFromYaml(`
+upstreams:
+  ark:
+    baseUrl: https://ark.example.com
+    secretKey: CCC_ARK
+    upstreamId: kimi-k3
+routes:
+  - aliases: ["kimi-k3"]
+    upstream: ark
+    fallbacks:
+      - baseUrl: https://glm.example.com
+        secretKey: CCC_GLM
+        upstreamId: GLM-5.2
+`);
+    expect(routes["kimi-k3"].baseUrl).toBe("https://ark.example.com");
+    expect(routes["kimi-k3"].fallbacks![0].baseUrl).toBe("https://glm.example.com");
+    expect(routes["kimi-k3"].fallbacks![0].upstreamId).toBe("GLM-5.2");
+  });
+
+  test("混用：upstream 内联对象，fallbacks 用引用", () => {
+    const routes = loadRoutesFromYaml(`
+upstreams:
+  glm:
+    baseUrl: https://glm.example.com
+    secretKey: CCC_GLM
+    upstreamId: GLM-5.2
+routes:
+  - aliases: ["kimi-k3"]
+    upstream:
+      baseUrl: https://ark.example.com
+      secretKey: CCC_ARK
+      upstreamId: kimi-k3
+    fallbacks: [glm]
+`);
+    expect(routes["kimi-k3"].baseUrl).toBe("https://ark.example.com");
+    expect(routes["kimi-k3"].fallbacks![0].upstreamId).toBe("GLM-5.2");
+  });
+
+  test("upstreams 块内三元组非法 → ConfigError（定位到 upstreams.<name>）", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+upstreams:
+  glm:
+    baseUrl: ftp://nope.example.com
+    secretKey: CCC_GLM
+    upstreamId: GLM-5.2
+routes:
+  - aliases: ["x"]
+    upstream: glm
+`)
+    ).toThrow(/upstreams\.glm.*http\/https|http\/https.*upstreams\.glm/s);
+  });
+
+  test("upstreams 非 mapping（数组）→ ConfigError", () => {
+    expect(() =>
+      loadRoutesFromYaml(`
+upstreams: [1, 2, 3]
+routes:
+  - aliases: ["x"]
+    upstream:
+      baseUrl: https://x.example.com
+      secretKey: CCC_X
+      upstreamId: x
+`)
+    ).toThrow(/upstreams: must be a mapping/);
   });
 });
 

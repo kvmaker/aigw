@@ -7,35 +7,38 @@
 #   内置 DEFAULT_ROUTES  <  本 YAML 文件  <  CCC_ROUTES（env JSON，最高，便于临时覆盖）
 #
 # secretKey 写的是 .env 里的环境变量名，真实 token 绝不入 YAML、不入库。
-# 顶层支持两种形态：本文件用的 { routes: [...] }，或直接写成数组。
+# 顶层支持三种形态：直接数组、{ routes: [...] }，
+# 或本文件使用的 { upstreams: {...}, routes: [...] }。
+# route 的 upstream / fallbacks 也支持内联对象（兼容旧格式）。
+
+# 命名上游：每个上游（baseUrl + secretKey + upstreamId）定义一次并命名，
+# route 的 upstream / fallbacks 只需写名字，避免 fallback 里三元组重复。
+upstreams:
+  glm:
+    baseUrl: https://open.bigmodel.cn/api/anthropic
+    secretKey: CCC_GLM_AUTH_TOKEN
+    upstreamId: GLM-5.2
+  ark:
+    baseUrl: https://ark.cn-beijing.volces.com/api/plan
+    secretKey: CCC_ARK_AUTH_TOKEN
+    upstreamId: kimi-k3
+  minimax:
+    baseUrl: https://api.minimaxi.com/anthropic
+    secretKey: CCC_MINIMAX_AUTH_TOKEN
+    upstreamId: MiniMax-M3[1m]
 
 routes:
   # GLM-5.2 —— 主上游直接命中，无 fallback
   - aliases: ["glm-5.2", "glm-5.2[1m]"]
-    upstream:
-      baseUrl: https://open.bigmodel.cn/api/anthropic
-      secretKey: CCC_GLM_AUTH_TOKEN
-      upstreamId: GLM-5.2
+    upstream: glm
 
   # kimi-k3 —— 主走 ark「Agent Plan」专属端点 /api/plan；
   # 主上游失败（网络错 / 5xx / 429 / 529）时 fallback 到 GLM（跨 provider 链）
   - aliases: ["kimi-k3", "kimi-k3[1m]"]
-    upstream:
-      baseUrl: https://ark.cn-beijing.volces.com/api/plan
-      secretKey: CCC_ARK_AUTH_TOKEN
-      upstreamId: kimi-k3
-    fallbacks:
-      - baseUrl: https://open.bigmodel.cn/api/anthropic
-        secretKey: CCC_GLM_AUTH_TOKEN
-        upstreamId: GLM-5.2
+    upstream: ark
+    fallbacks: [glm]
 
   # MiniMax-M3 —— 主 + 备示例（按需启用）
   - aliases: ["minimax-m3", "minimax-m3[1m]"]
-    upstream:
-      baseUrl: https://api.minimaxi.com/anthropic
-      secretKey: CCC_MINIMAX_AUTH_TOKEN
-      upstreamId: MiniMax-M3[1m]
-    fallbacks:
-      - baseUrl: https://open.bigmodel.cn/api/anthropic
-        secretKey: CCC_GLM_AUTH_TOKEN
-        upstreamId: GLM-5.2
+    upstream: minimax
+    fallbacks: [glm]
