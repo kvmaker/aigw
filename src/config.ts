@@ -1,6 +1,9 @@
 // config — 路由表、env 加载、model 规范化
 // 路由表 1:1 对应原 ccc-router Worker。
 
+import { readFileSync } from "node:fs";
+import { parse as parseYaml } from "yaml";
+
 export interface Upstream {
   baseUrl: string;
   /** env 里对应的 secret 名字 */
@@ -124,13 +127,163 @@ export function loadRoutesFromEnv(
   return routes;
 }
 
+// 配置错误（YAML schema 校验失败 / 文件读失败 / 解析失败）。
+// fail-fast：loadConfig 抛出后进程拒绝启动，避免带病运行。
+export class ConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConfigError";
+  }
+}
+
+// ---- YAML 配置层 ----
+// YAML entry 用 secretKey（对齐内部 Upstream），与 env JSON 层的 secret 字段区分。
+// 顶层支持两种形态：直接数组 [...entries]，或 { routes: [...] }。
+interface YamlUpstreamRaw {
+  baseUrl: string;
+  secretKey: string;
+  upstreamId: string;
+}
+
+interface YamlRouteEntryRaw {
+  aliases: string[];
+  upstream: YamlUpstreamRaw;
+  fallbacks?: YamlUpstreamRaw[];
+}
+
+// 校验单个 upstream 节点（主 / fallback 共用）。非法即抛 ConfigError。
+function validateUpstream(u: unknown, ctx: string): YamlUpstreamRaw {
+  if (typeof u !== "object" || u === null) {
+    throw new ConfigError(`${ctx}: must be an object`);
+  }
+  const obj = u as Record<string, unknown>;
+  const { baseUrl, secretKey, upstreamId } = obj;
+  if (typeof baseUrl !== "string" || baseUrl.length === 0) {
+    throw new ConfigError(`${ctx}: baseUrl must be a non-empty string`);
+  }
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    throw new ConfigError(`${ctx}: baseUrl must be a valid URL, got: ${baseUrl}`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new ConfigError(`${ctx}: baseUrl must be http/https, got: ${url.protocol}`);
+  }
+  if (typeof secretKey !== "string" || secretKey.length === 0) {
+    throw new ConfigError(`${ctx}: secretKey must be a non-empty string`);
+  }
+  if (typeof upstreamId !== "string" || upstreamId.length === 0) {
+    throw new ConfigError(`${ctx}: upstreamId must be a non-empty string`);
+  }
+  return { baseUrl, secretKey, upstreamId };
+}
+
+// 校验一条路由 entry。非法即抛 ConfigError。
+function validateRouteEntry(entry: unknown, index: number): YamlRouteEntryRaw {
+  const ctx = `routes[${index}]`;
+  if (typeof entry !== "object" || entry === null) {
+    throw new ConfigError(`${ctx}: must be an object`);
+  }
+  const obj = entry as Record<string, unknown>;
+  const aliases = obj.aliases;
+  if (!Array.isArray(aliases) || aliases.length === 0) {
+    throw new ConfigError(`${ctx}: aliases must be a non-empty array`);
+  }
+  for (const [i, a] of aliases.entries()) {
+    if (typeof a !== "string" || a.length === 0) {
+      throw new ConfigError(`${ctx}.aliases[${i}]: must be a non-empty string`);
+    }
+  }
+  const upstream = validateUpstream(obj.upstream, `${ctx}.upstream`);
+  let fallbacks: YamlUpstreamRaw[] | undefined;
+  if (obj.fallbacks !== undefined) {
+    if (!Array.isArray(obj.fallbacks)) {
+      throw new ConfigError(`${ctx}.fallbacks: must be an array`);
+    }
+    fallbacks = obj.fallbacks.map((f, fi) =>
+      validateUpstream(f, `${ctx}.fallbacks[${fi}]`)
+    );
+  }
+  return { aliases, upstream, fallbacks };
+}
+
+// 解析 YAML 字符串为路由表。纯函数（无 fs），便于单测。
+// 顶层形态：直接数组 或 { routes: [...] }。
+export function loadRoutesFromYaml(content: string): Record<string, Upstream> {
+  let doc: unknown;
+  try {
+    doc = parseYaml(content);
+  } catch (err) {
+    throw new ConfigError(`YAML parse failed: ${(err as Error).message}`);
+  }
+  if (doc === null || doc === undefined) {
+    throw new ConfigError("YAML is empty");
+  }
+  let entries: unknown[];
+  if (Array.isArray(doc)) {
+    entries = doc;
+  } else if (
+    typeof doc === "object" &&
+    doc !== null &&
+    Array.isArray((doc as Record<string, unknown>).routes)
+  ) {
+    entries = (doc as { routes: unknown[] }).routes;
+  } else {
+    throw new ConfigError("YAML root must be an array or { routes: [...] }");
+  }
+
+  const routes: Record<string, Upstream> = {};
+  for (const [index, entry] of entries.entries()) {
+    const valid = validateRouteEntry(entry, index);
+    const fb = valid.fallbacks?.map((f) => ({
+      baseUrl: f.baseUrl,
+      secretKey: f.secretKey,
+      upstreamId: f.upstreamId,
+    }));
+    const up: Upstream = {
+      baseUrl: valid.upstream.baseUrl,
+      secretKey: valid.upstream.secretKey,
+      upstreamId: valid.upstream.upstreamId,
+      ...(fb && fb.length > 0 ? { fallbacks: fb } : {}),
+    };
+    for (const alias of valid.aliases) {
+      routes[normalizeModel(alias)] = up;
+    }
+  }
+  return routes;
+}
+
+// 读 CCC_CONFIG_FILE 指向的 YAML 文件并解析。文件缺失 / 不可读 → ConfigError。
+function loadRoutesFromYamlFile(filePath: string): Record<string, Upstream> {
+  let content: string;
+  try {
+    content = readFileSync(filePath, "utf8");
+  } catch (err) {
+    throw new ConfigError(
+      `cannot read CCC_CONFIG_FILE (${filePath}): ${(err as Error).message}`
+    );
+  }
+  return loadRoutesFromYaml(content);
+}
+
 // 从 env 聚合所有运行时配置。默认参数 process.env，测试可传 mock env。
+// 路由表优先级（后者覆盖前者）：
+//   DEFAULT_ROUTES（内置兜底） < CCC_CONFIG_FILE(YAML) < CCC_ROUTES(env JSON，最高)
 export function loadConfig(
   env: Record<string, string | undefined> = process.env
 ): AppConfig {
+  // 路由表三层合并：内置兜底 → YAML 文件 → env JSON（最高优先，便于临时覆盖）。
+  // CCC_CONFIG_FILE 缺省时不启用 YAML，行为与旧版一致。
+  let routes: Record<string, Upstream> = { ...DEFAULT_ROUTES };
+  if (env.CCC_CONFIG_FILE) {
+    routes = { ...routes, ...loadRoutesFromYamlFile(env.CCC_CONFIG_FILE) };
+  }
+  routes = { ...routes, ...loadRoutesFromEnv(env.CCC_ROUTES) };
+
   return {
     routerToken: env.CCC_ROUTER_TOKEN ?? "",
-    routes: { ...DEFAULT_ROUTES, ...loadRoutesFromEnv(env.CCC_ROUTES) },
+    routes,
     secrets: {
       CCC_MINIMAX_AUTH_TOKEN: env.CCC_MINIMAX_AUTH_TOKEN,
       CCC_GLM_AUTH_TOKEN: env.CCC_GLM_AUTH_TOKEN,

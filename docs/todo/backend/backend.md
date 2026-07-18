@@ -69,7 +69,7 @@ interface RouteEntry {
 
 ---
 
-## B01. 增加使用 yaml 进行配置的能力 `[ ]` -- P2
+## B01. 增加使用 yaml 进行配置的能力 `[~]` -- P2
 
 **现状**：路由表目前有两处来源——`src/config.ts` 里硬编码的 `DEFAULT_ROUTES`（改路由要改代码、重新部署），以及 `CCC_ROUTES` 环境变量（JSON 数组字符串，塞在 `.env` 里，可读性差、无注释、无校验）。随着上游增多（GLM / minimax / ark）和 B00 fallback 引入「主 + 备」结构，JSON 字符串会越来越难维护。
 

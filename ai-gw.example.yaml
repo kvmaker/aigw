@@ -1,0 +1,41 @@
+# ai-gw 路由表示例（YAML）
+#
+# 启用方式：复制为 ai-gw.yaml 并按需修改，再用环境变量指向它：
+#   CCC_CONFIG_FILE=/path/to/ai-gw.yaml
+#
+# 路由表优先级（后者覆盖前者）：
+#   内置 DEFAULT_ROUTES  <  本 YAML 文件  <  CCC_ROUTES（env JSON，最高，便于临时覆盖）
+#
+# secretKey 写的是 .env 里的环境变量名，真实 token 绝不入 YAML、不入库。
+# 顶层支持两种形态：本文件用的 { routes: [...] }，或直接写成数组。
+
+routes:
+  # GLM-5.2 —— 主上游直接命中，无 fallback
+  - aliases: ["glm-5.2", "glm-5.2[1m]"]
+    upstream:
+      baseUrl: https://open.bigmodel.cn/api/anthropic
+      secretKey: CCC_GLM_AUTH_TOKEN
+      upstreamId: GLM-5.2
+
+  # kimi-k3 —— 主走 ark「Agent Plan」专属端点 /api/plan；
+  # 主上游失败（网络错 / 5xx / 429 / 529）时 fallback 到 GLM（跨 provider 链）
+  - aliases: ["kimi-k3", "kimi-k3[1m]"]
+    upstream:
+      baseUrl: https://ark.cn-beijing.volces.com/api/plan
+      secretKey: CCC_ARK_AUTH_TOKEN
+      upstreamId: kimi-k3
+    fallbacks:
+      - baseUrl: https://open.bigmodel.cn/api/anthropic
+        secretKey: CCC_GLM_AUTH_TOKEN
+        upstreamId: GLM-5.2
+
+  # MiniMax-M3 —— 主 + 备示例（按需启用）
+  - aliases: ["minimax-m3", "minimax-m3[1m]"]
+    upstream:
+      baseUrl: https://api.minimaxi.com/anthropic
+      secretKey: CCC_MINIMAX_AUTH_TOKEN
+      upstreamId: MiniMax-M3[1m]
+    fallbacks:
+      - baseUrl: https://open.bigmodel.cn/api/anthropic
+        secretKey: CCC_GLM_AUTH_TOKEN
+        upstreamId: GLM-5.2
