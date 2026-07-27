@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="96" viewBox="0 0 1200 96"
+     role="img" aria-labelledby="s4-t s4-d">
+  <title id="s4-t">04 Fallback 上游容错</title>
+  <desc id="s4-d">分节标题：Fallback，主上游失败时按序尝试备选。</desc>
+  <rect x="1" y="1" width="1198" height="94" rx="16" fill="#0d1017" stroke="#1c2534" stroke-width="1.5"/>
+  <rect x="32" y="26" width="6" height="44" rx="3" fill="#f5a524"/>
+  <text x="58" y="63" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="32" font-weight="700" fill="#3a3320">04</text>
+  <text x="120" y="62" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif" font-size="31" font-weight="700" fill="#e6edf3">Fallback <tspan font-size="22" font-weight="500" fill="#a7b3c2">上游容错</tspan></text>
+  <text x="1168" y="60" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" letter-spacing="1.5" fill="#6b7684">5xx · 429 · 529 → next</text>
+</svg>

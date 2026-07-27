@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="312" viewBox="0 0 1200 312"
+     role="img" aria-labelledby="hero-title hero-desc">
+  <title id="hero-title">ai-gw — Anthropic 协议路由器</title>
+  <desc id="hero-desc">ai-gw 是一个 /v1/messages 网关，按 body.model 把 Anthropic 请求路由到 GLM、MiniMax、方舟 Kimi 三个上游，强制 BYOK、SSE 流式透传、多上游自动 fallback。右侧面板列出三个路由目标及其上游模型 ID。</desc>
+
+  <defs>
+    <linearGradient id="hero-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0c1018"/>
+      <stop offset="1" stop-color="#090c12"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="1" y="1" width="1198" height="310" rx="24" fill="url(#hero-bg)" stroke="#1c2534" stroke-width="1.5"/>
+
+  <!-- ============ title block (left) ============ -->
+  <g transform="translate(64 0)">
+    <text x="2" y="78" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="19" letter-spacing="3" fill="#8b949e">ANTHROPIC 协议路由器 · BUN 运行时</text>
+
+    <text x="0" y="170" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"
+          font-size="108" font-weight="800" fill="#e6edf3" letter-spacing="-2">ai<tspan fill="#38bdf8">-</tspan>gw</text>
+
+    <!-- endpoint pill -->
+    <g transform="translate(312 112)">
+      <rect x="0" y="0" width="262" height="46" rx="10" fill="#0e1622" stroke="#243244" stroke-width="1.5"/>
+      <circle cx="26" cy="23" r="5" fill="#34d399"/>
+      <text x="44" y="30" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="21" fill="#cdd9e5">POST /v1/messages</text>
+    </g>
+
+    <text x="2" y="228" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"
+          font-size="25" fill="#a7b3c2">按 <tspan fill="#e6edf3" font-weight="600">body.model</tspan> 路由到 GLM · MiniMax · 方舟 Kimi</text>
+    <text x="2" y="266" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif"
+          font-size="25" fill="#a7b3c2"><tspan fill="#38bdf8" font-weight="600">BYOK</tspan> · <tspan fill="#34d399" font-weight="600">SSE 流式透传</tspan> · 多上游自动 <tspan fill="#f5a524" font-weight="600">fallback</tspan></text>
+  </g>
+
+  <!-- ============ routes-to panel (right) ============ -->
+  <g transform="translate(756 44)">
+    <rect x="0" y="0" width="380" height="224" rx="16" fill="#0e131c" stroke="#202a39" stroke-width="1.5"/>
+
+    <text x="24" y="42" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="16" letter-spacing="2.5" fill="#6b7684">ROUTES TO · 路由目标</text>
+
+    <!-- row: GLM -->
+    <g transform="translate(24 62)">
+      <circle cx="8" cy="20" r="6" fill="#8ab4f8"/>
+      <text x="28" y="27" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="24" font-weight="600" fill="#e6edf3">GLM</text>
+      <text x="332" y="27" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#8b949e">GLM-5.2</text>
+    </g>
+    <line x1="24" y1="112" x2="356" y2="112" stroke="#1b2431" stroke-width="1"/>
+
+    <!-- row: MiniMax -->
+    <g transform="translate(24 118)">
+      <circle cx="8" cy="20" r="6" fill="#f78166"/>
+      <text x="28" y="27" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="24" font-weight="600" fill="#e6edf3">MiniMax</text>
+      <text x="332" y="27" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#8b949e">M3 · M2.7</text>
+    </g>
+    <line x1="24" y1="168" x2="356" y2="168" stroke="#1b2431" stroke-width="1"/>
+
+    <!-- row: 方舟 Kimi -->
+    <g transform="translate(24 174)">
+      <circle cx="8" cy="20" r="6" fill="#a5d6ff"/>
+      <text x="28" y="27" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif" font-size="24" font-weight="600" fill="#e6edf3">方舟 Kimi</text>
+      <text x="332" y="27" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#8b949e">kimi-k3</text>
+    </g>
+  </g>
+</svg>
