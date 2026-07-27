@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="520" viewBox="0 0 1200 520"
+     role="img" aria-labelledby="flow-title flow-desc">
+  <title id="flow-title">ai-gw 请求生命周期与 fallback 决策</title>
+  <desc id="flow-desc">上半部分是请求流水线：客户端携带 Bearer token → ai-gw 认证并按 model 查路由表 → 重写 body.model 为 upstreamId 并注入 x-api-key → 转发到上游 baseUrl/v1/messages → SSE 流式透传回客户端。下半部分是失败判定表：只看 HTTP status，5xx/429/529 触发下一候选，2xx 透传成功响应，4xx 原样透传；候选全部失败返回脱敏的聚合 502。</desc>
+
+  <defs>
+    <linearGradient id="flow-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0c1018"/>
+      <stop offset="1" stop-color="#090c12"/>
+    </linearGradient>
+    <linearGradient id="flow-line" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+    <marker id="flow-arrow" viewBox="0 0 10 10" refX="8" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#38bdf8"/>
+    </marker>
+    <marker id="flow-arrow-amber" viewBox="0 0 10 10" refX="8" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#f5a524"/>
+    </marker>
+  </defs>
+
+  <rect x="1" y="1" width="1198" height="518" rx="24" fill="url(#flow-bg)" stroke="#1c2534" stroke-width="1.5"/>
+
+  <!-- ===== header ===== -->
+  <text x="64" y="66" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif"
+        font-size="30" font-weight="700" fill="#e6edf3">请求生命周期</text>
+  <text x="240" y="66" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+        font-size="18" letter-spacing="2" fill="#5f6b7c">REQUEST LIFECYCLE</text>
+  <text x="1136" y="66" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+        font-size="18" fill="#8b949e">强制 BYOK · client token 被忽略</text>
+
+  <!-- ===== pipeline row (happy path) y 104..200 ===== -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+    <!-- Client -->
+    <g transform="translate(64 104)">
+      <rect width="176" height="96" rx="12" fill="#0f151d" stroke="#243244" stroke-width="1.5"/>
+      <text x="20" y="40" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="22" font-weight="600" fill="#e6edf3">客户端</text>
+      <text x="20" y="70" font-size="16" fill="#8b949e">Bearer token</text>
+    </g>
+    <!-- N1 认证·路由 -->
+    <g transform="translate(268 104)">
+      <rect width="210" height="96" rx="12" fill="#0e1622" stroke="#38bdf8" stroke-width="1.6"/>
+      <text x="20" y="38" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="21" font-weight="600" fill="#e6edf3">① 认证 · 路由</text>
+      <text x="20" y="64" font-size="15.5" fill="#9fb0c3">verifyBearer()</text>
+      <text x="20" y="84" font-size="15.5" fill="#9fb0c3">normalize → routes[]</text>
+    </g>
+    <!-- N2 重写·注入 -->
+    <g transform="translate(506 104)">
+      <rect width="210" height="96" rx="12" fill="#0e1622" stroke="#38bdf8" stroke-width="1.6"/>
+      <text x="20" y="38" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="21" font-weight="600" fill="#e6edf3">② 重写 · 注入</text>
+      <text x="20" y="64" font-size="15.5" fill="#9fb0c3">model = upstreamId</text>
+      <text x="20" y="84" font-size="15.5" fill="#9fb0c3">x-api-key: ••••</text>
+    </g>
+    <!-- N3 转发上游 -->
+    <g transform="translate(744 104)">
+      <rect width="210" height="96" rx="12" fill="#0e1622" stroke="#38bdf8" stroke-width="1.6"/>
+      <text x="20" y="38" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="21" font-weight="600" fill="#e6edf3">③ 转发上游</text>
+      <text x="20" y="64" font-size="15.5" fill="#9fb0c3">fetch baseUrl</text>
+      <text x="20" y="84" font-size="15.5" fill="#9fb0c3">+ /v1/messages</text>
+    </g>
+    <!-- N4 透传 -->
+    <g transform="translate(982 104)">
+      <rect width="154" height="96" rx="12" fill="#0e1c16" stroke="#34d399" stroke-width="1.6"/>
+      <text x="20" y="38" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="21" font-weight="600" fill="#e6edf3">④ 透传</text>
+      <text x="20" y="64" font-size="15.5" fill="#8fe3c0">SSE stream</text>
+      <text x="20" y="84" font-size="15.5" fill="#8fe3c0">→ client</text>
+    </g>
+
+    <!-- arrows -->
+    <g fill="none" stroke="url(#flow-line)" stroke-width="2.2">
+      <path d="M240 152 H266" marker-end="url(#flow-arrow)"/>
+      <path d="M478 152 H504" marker-end="url(#flow-arrow)"/>
+      <path d="M716 152 H742" marker-end="url(#flow-arrow)"/>
+      <path d="M954 152 H980" marker-end="url(#flow-arrow)"/>
+    </g>
+  </g>
+
+  <!-- connector: N3 status feeds decision -->
+  <path d="M849 200 V244" fill="none" stroke="#f5a524" stroke-width="2" stroke-dasharray="5 5" marker-end="url(#flow-arrow-amber)"/>
+  <text x="860" y="228" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#f5a524">status</text>
+
+  <!-- ===== fallback decision panel y 250..472 ===== -->
+  <g transform="translate(64 250)">
+    <rect width="1072" height="222" rx="16" fill="#0e131c" stroke="#202a39" stroke-width="1.5"/>
+
+    <text x="24" y="40" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="22" font-weight="700" fill="#e6edf3">失败判定</text>
+    <text x="128" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" fill="#6b7684">只看 HTTP status · 不读 body</text>
+
+    <!-- row1: 5xx/429/529 -> next candidate -->
+    <g transform="translate(24 58)">
+      <rect width="238" height="42" rx="8" fill="#241a0b" stroke="#f5a524" stroke-width="1.4"/>
+      <text x="16" y="27" font-family="ui-monospace, Menlo, monospace" font-size="17" fill="#fbbf24">5xx · 429 · 529</text>
+      <path d="M246 21 H286" fill="none" stroke="#f5a524" stroke-width="2" marker-end="url(#flow-arrow-amber)"/>
+      <text x="300" y="20" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="18" fill="#cdd9e5">试下一候选 ↻</text>
+      <text x="300" y="40" font-family="ui-monospace, Menlo, monospace" font-size="15" fill="#7d8896">cancel body → 重写 → 注入 → 转发</text>
+    </g>
+
+    <!-- row2: 2xx -->
+    <g transform="translate(24 106)">
+      <rect width="238" height="42" rx="8" fill="#0e2018" stroke="#34d399" stroke-width="1.4"/>
+      <text x="16" y="27" font-family="ui-monospace, Menlo, monospace" font-size="17" fill="#34d399">2xx</text>
+      <path d="M246 21 H286" fill="none" stroke="#34d399" stroke-width="2" marker-end="url(#flow-arrow)"/>
+      <text x="300" y="27" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="18" fill="#cdd9e5">透传成功响应（含 SSE 流式）</text>
+    </g>
+
+    <!-- row3: 4xx -->
+    <g transform="translate(24 154)">
+      <rect width="238" height="42" rx="8" fill="#141b27" stroke="#35415a" stroke-width="1.4"/>
+      <text x="16" y="27" font-family="ui-monospace, Menlo, monospace" font-size="17" fill="#9fb0c3">4xx（含 401/403）</text>
+      <path d="M246 21 H286" fill="none" stroke="#5f6b7c" stroke-width="2" marker-end="url(#flow-arrow)"/>
+      <text x="300" y="27" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="18" fill="#cdd9e5">原样透传，客户端错误不转嫁</text>
+    </g>
+
+    <!-- right notes column -->
+    <line x1="700" y1="58" x2="700" y2="196" stroke="#1b2431" stroke-width="1"/>
+    <g transform="translate(724 58)">
+      <text x="0" y="20" font-family="ui-monospace, Menlo, monospace" font-size="15" letter-spacing="1.5" fill="#6b7684">终态与边界</text>
+      <text x="0" y="52" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="16.5" fill="#c0ccd9">· 候选链全失败 → 聚合 <tspan fill="#ff8f6b" font-weight="600">502</tspan></text>
+      <text x="16" y="76" font-family="ui-monospace, Menlo, monospace" font-size="14.5" fill="#7d8896">脱敏：index · reason · status</text>
+      <text x="0" y="108" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="16.5" fill="#c0ccd9">· 全为 secret 缺失 → <tspan fill="#fbbf24" font-weight="600">500</tspan> config_error</text>
+      <text x="0" y="140" font-family="-apple-system, 'PingFang SC', sans-serif" font-size="16.5" fill="#c0ccd9">· SSE 首字节透传后不可回退</text>
+    </g>
+  </g>
+</svg>

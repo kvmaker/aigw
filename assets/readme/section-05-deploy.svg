@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="96" viewBox="0 0 1200 96"
+     role="img" aria-labelledby="s5-t s5-d">
+  <title id="s5-t">05 部署</title>
+  <desc id="s5-d">分节标题：部署，systemd 加 Caddy 反代。</desc>
+  <rect x="1" y="1" width="1198" height="94" rx="16" fill="#0d1017" stroke="#1c2534" stroke-width="1.5"/>
+  <rect x="32" y="26" width="6" height="44" rx="3" fill="#38bdf8"/>
+  <text x="58" y="63" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="32" font-weight="700" fill="#33415a">05</text>
+  <text x="120" y="62" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif" font-size="31" font-weight="700" fill="#e6edf3">部署</text>
+  <text x="1168" y="60" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" letter-spacing="1.5" fill="#6b7684">DEPLOY · systemd + caddy</text>
+</svg>
